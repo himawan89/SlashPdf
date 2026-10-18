@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SlashPDF — Free PDF Editor</title>
+  <meta name="description" content="SlashPDF is a free, full-featured PDF editor. View, edit, merge, convert, annotate, and sign PDF documents directly in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Rounded" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+</head>
+<body>
+  <div id="app">
+    <!-- Title Bar -->
+    <header id="titlebar">
+      <div class="titlebar-left">
+        <div class="app-logo">
+          <span class="material-symbols-rounded">description</span>
+          <span class="app-name">Slash<strong>PDF</strong></span>
+        </div>
+        <div class="quick-access-toolbar" id="quickAccessToolbar">
+          <button class="qat-btn" data-action="save" title="Save (Ctrl+S)">
+            <span class="material-symbols-rounded">save</span>
+          </button>
+          <button class="qat-btn" data-action="save-as" title="Save As (Ctrl+Shift+S)">
+            <span class="material-symbols-rounded">save_as</span>
+          </button>
+          <button class="qat-btn" data-action="undo" title="Undo (Ctrl+Z)">
+            <span class="material-symbols-rounded">undo</span>
+          </button>
+          <button class="qat-btn" data-action="redo" title="Redo (Ctrl+Y)">
+            <span class="material-symbols-rounded">redo</span>
+          </button>
+        </div>
+      </div>
+      <div class="titlebar-center">
+        <span id="documentTitle">SlashPDF — Free PDF Editor</span>
+      </div>
+      <div class="titlebar-right">
+        <button class="titlebar-btn" id="btnThemeToggle" title="Toggle Theme">
+          <span class="material-symbols-rounded">dark_mode</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Document Tab Bar -->
+    <div id="docTabBar">
+      <div class="doc-tabs-scroll" id="docTabsScroll">
+        <!-- Tabs inserted dynamically -->
+      </div>
+      <button class="tab-action-btn" id="btnOpenFile" title="Open File">
+        <span class="material-symbols-rounded">add</span>
+      </button>
+    </div>
+
+    <!-- Ribbon -->
+    <nav id="ribbon">
+      <div class="ribbon-tabs" id="ribbonTabs">
+        <button class="ribbon-tab active" data-tab="home">Home</button>
+        <button class="ribbon-tab" data-tab="edit">Edit</button>
+        <button class="ribbon-tab" data-tab="pages">Pages</button>
+        <button class="ribbon-tab" data-tab="review">Review</button>
+        <button class="ribbon-tab" data-tab="forms">Forms</button>
+        <button class="ribbon-tab" data-tab="convert">Convert</button>
+        <button class="ribbon-tab" data-tab="protect">Protect</button>
+      </div>
+      <div class="ribbon-panels" id="ribbonPanels">
+        <!-- HOME TAB -->
+        <div class="ribbon-panel active" data-panel="home">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">File</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" id="rbtnOpen" data-action="open">
+                <span class="material-symbols-rounded">folder_open</span>
+                <span class="ribbon-btn-label">Open</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" id="rbtnCreate" data-action="create-blank">
+                <span class="material-symbols-rounded">note_add</span>
+                <span class="ribbon-btn-label">New Blank</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="save">
+                <span class="material-symbols-rounded">save</span>
+                <span class="ribbon-btn-label">Save</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="save-as">
+                <span class="material-symbols-rounded">save_as</span>
+                <span class="ribbon-btn-label">Save As</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="print">
+                <span class="material-symbols-rounded">print</span>
+                <span class="ribbon-btn-label">Print</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Create & Combine</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="merge">
+                <span class="material-symbols-rounded">merge</span>
+                <span class="ribbon-btn-label">Merge PDF</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="images-to-pdf">
+                <span class="material-symbols-rounded">add_photo_alternate</span>
+                <span class="ribbon-btn-label">Images → PDF</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="split">
+                <span class="material-symbols-rounded">call_split</span>
+                <span class="ribbon-btn-label">Split PDF</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Page Tools</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="rotate-cw" title="Rotate Current Page 90° Clockwise">
+                <span class="material-symbols-rounded">rotate_right</span>
+                <span class="ribbon-btn-label">Rotate CW</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="insert-blank" title="Add Blank Page After Current Page">
+                <span class="material-symbols-rounded">note_add</span>
+                <span class="ribbon-btn-label">Add Blank</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="insert-file" title="Insert Pages from Another File...">
+                <span class="material-symbols-rounded">post_add</span>
+                <span class="ribbon-btn-label">Insert File</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="delete-page-current" title="Delete Current Page">
+                <span class="material-symbols-rounded">delete</span>
+                <span class="ribbon-btn-label">Delete Page</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Quick Tools</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="compress">
+                <span class="material-symbols-rounded">compress</span>
+                <span class="ribbon-btn-label">Compress</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="watermark">
+                <span class="material-symbols-rounded">branding_watermark</span>
+                <span class="ribbon-btn-label">Watermark</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="metadata">
+                <span class="material-symbols-rounded">info</span>
+                <span class="ribbon-btn-label">Edit Metadata</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="remove-metadata">
+                <span class="material-symbols-rounded">delete_sweep</span>
+                <span class="ribbon-btn-label">Sanitize</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- EDIT TAB -->
+        <div class="ribbon-panel" data-panel="edit">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Tools</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg active" id="rbtnHandTool" data-action="hand-tool" title="Hand Tool (Pan & Scroll)">
+                <span class="material-symbols-rounded">pan_tool</span>
+                <span class="ribbon-btn-label">Hand Tool</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" id="rbtnSelectTool" data-action="select-tool" title="Select & Copy Text">
+                <span class="material-symbols-rounded">text_select_move_forward_word</span>
+                <span class="ribbon-btn-label">Select Text</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" id="rbtnTextEditMode" data-action="toggle-text-edit" title="Edit Text Mode — Select, move, format & edit existing text blocks">
+                <span class="material-symbols-rounded">edit_note</span>
+                <span class="ribbon-btn-label">Edit Text</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Text</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-text" title="Add custom text to page">
+                <span class="material-symbols-rounded">text_fields</span>
+                <span class="ribbon-btn-label">Add Text</span>
+              </button>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="add-heading" title="Add large heading title">
+                  <span class="material-symbols-rounded">title</span>
+                  <span>Heading</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="find-replace" title="Find text in document">
+                  <span class="material-symbols-rounded">search</span>
+                  <span>Find Text</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Image</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-image" title="Insert image onto page">
+                <span class="material-symbols-rounded">add_photo_alternate</span>
+                <span class="ribbon-btn-label">Insert Image</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Links</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-link" title="Add clickable link or internal jump">
+                <span class="material-symbols-rounded">add_link</span>
+                <span class="ribbon-btn-label">Add Link</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Bookmarks</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-bookmark" title="Bookmark current page">
+                <span class="material-symbols-rounded">bookmark_add</span>
+                <span class="ribbon-btn-label">Add Bookmark</span>
+              </button>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="manage-bookmarks" title="Open Bookmarks outline">
+                  <span class="material-symbols-rounded">bookmarks</span>
+                  <span>Manage</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Header & Footer</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="header-footer" title="Add headers and footers">
+                <span class="material-symbols-rounded">vertical_split</span>
+                <span class="ribbon-btn-label">Header/Footer</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="page-numbers" title="Add page numbers to document">
+                <span class="material-symbols-rounded">format_list_numbered</span>
+                <span class="ribbon-btn-label">Page Numbers</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PAGES TAB -->
+        <div class="ribbon-panel" data-panel="pages">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Insert & Add</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="insert-blank" title="Add Blank Page After Current Page">
+                <span class="material-symbols-rounded">note_add</span>
+                <span class="ribbon-btn-label">Add Blank</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="insert-file" title="Insert Pages from Another PDF File...">
+                <span class="material-symbols-rounded">post_add</span>
+                <span class="ribbon-btn-label">Insert File</span>
+              </button>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="duplicate-page" title="Duplicate Current Page">
+                  <span class="material-symbols-rounded">content_copy</span>
+                  <span>Duplicate</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="extract-pages" title="Extract Pages to New PDF">
+                  <span class="material-symbols-rounded">exit_to_app</span>
+                  <span>Extract</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Rotate & Delete</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="rotate-cw" title="Rotate Current Page 90° Clockwise">
+                <span class="material-symbols-rounded">rotate_right</span>
+                <span class="ribbon-btn-label">Rotate CW</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="delete-page-current" title="Delete Current Page">
+                <span class="material-symbols-rounded">delete</span>
+                <span class="ribbon-btn-label">Delete Page</span>
+              </button>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="rotate-ccw" title="Rotate Current Page 90° CCW">
+                  <span class="material-symbols-rounded">rotate_left</span>
+                  <span>Rotate CCW</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="rotate-dialog" title="Rotate Page Range Options...">
+                  <span class="material-symbols-rounded">tune</span>
+                  <span>Rotate Range</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="delete-pages" title="Delete Page Range...">
+                  <span class="material-symbols-rounded">playlist_remove</span>
+                  <span>Delete Range</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Organize</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="reorder-pages">
+                <span class="material-symbols-rounded">swap_vert</span>
+                <span class="ribbon-btn-label">Reorder</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="split" title="Split Document into Multiple PDFs">
+                <span class="material-symbols-rounded">call_split</span>
+                <span class="ribbon-btn-label">Split PDF</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="crop">
+                <span class="material-symbols-rounded">crop</span>
+                <span class="ribbon-btn-label">Crop Page</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Numbering</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="page-numbering">
+                <span class="material-symbols-rounded">tag</span>
+                <span class="ribbon-btn-label">Page Number</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="bates-numbering">
+                <span class="material-symbols-rounded">pin</span>
+                <span class="ribbon-btn-label">Bates Number</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Split</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="split-doc">
+                <span class="material-symbols-rounded">call_split</span>
+                <span class="ribbon-btn-label">Split Doc</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="replace-pages">
+                <span class="material-symbols-rounded">find_replace</span>
+                <span class="ribbon-btn-label">Replace</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- REVIEW TAB -->
+        <div class="ribbon-panel" data-panel="review">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Text Markup</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="highlight" data-action="tool-highlight">
+                <span class="material-symbols-rounded" style="color:#FBBF24">border_color</span>
+                <span class="ribbon-btn-label">Highlight</span>
+              </button>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="underline" data-action="tool-underline">
+                  <span class="material-symbols-rounded">format_underlined</span>
+                  <span>Underline</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="strikethrough" data-action="tool-strikethrough">
+                  <span class="material-symbols-rounded">strikethrough_s</span>
+                  <span>Strikeout</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Notes</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="sticky-note" data-action="tool-sticky-note">
+                <span class="material-symbols-rounded" style="color:#FBBF24">sticky_note_2</span>
+                <span class="ribbon-btn-label">Sticky Note</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="text-comment" data-action="tool-text-comment">
+                <span class="material-symbols-rounded">comment</span>
+                <span class="ribbon-btn-label">Text Comment</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Draw & Shapes</div>
+            <div class="ribbon-group-content">
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="line" data-action="tool-line">
+                  <span class="material-symbols-rounded">horizontal_rule</span>
+                  <span>Line</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="arrow" data-action="tool-arrow">
+                  <span class="material-symbols-rounded">arrow_forward</span>
+                  <span>Arrow</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="rectangle" data-action="tool-rectangle">
+                  <span class="material-symbols-rounded">rectangle</span>
+                  <span>Rectangle</span>
+                </button>
+              </div>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="ellipse" data-action="tool-ellipse">
+                  <span class="material-symbols-rounded">circle</span>
+                  <span>Oval</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="freehand" data-action="tool-freehand">
+                  <span class="material-symbols-rounded">draw</span>
+                  <span>Freehand</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="eraser" data-action="tool-eraser">
+                  <span class="material-symbols-rounded">ink_eraser</span>
+                  <span>Eraser</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Stamp</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="stamp">
+                <span class="material-symbols-rounded">approval</span>
+                <span class="ribbon-btn-label">Stamp</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Tools</div>
+            <div class="ribbon-group-content">
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="compare-pdf">
+                  <span class="material-symbols-rounded">compare</span>
+                  <span>Compare</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="measure">
+                  <span class="material-symbols-rounded">straighten</span>
+                  <span>Measure</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="delete-annotations">
+                  <span class="material-symbols-rounded">delete_forever</span>
+                  <span>Clear All</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Color & Style</div>
+            <div class="ribbon-group-content">
+              <div class="annotation-props" id="annotationProps">
+                <label class="prop-label">Color:
+                  <input type="color" id="annotColor" value="#FBBF24" class="prop-color" />
+                </label>
+                <label class="prop-label">Stroke:
+                  <input type="range" id="annotStroke" min="1" max="10" value="2" class="prop-range" />
+                </label>
+                <label class="prop-label">Opacity:
+                  <input type="range" id="annotOpacity" min="10" max="100" value="50" class="prop-range" />
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FORMS TAB -->
+        <div class="ribbon-panel" data-panel="forms">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Form Actions</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="fill-form">
+                <span class="material-symbols-rounded">edit_note</span>
+                <span class="ribbon-btn-label">Fill Form</span>
+              </button>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="reset-form">
+                  <span class="material-symbols-rounded">restart_alt</span>
+                  <span>Reset Form</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="flatten-form">
+                  <span class="material-symbols-rounded">layers_clear</span>
+                  <span>Flatten Form</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Create Fields</div>
+            <div class="ribbon-group-content">
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="add-text-field">
+                  <span class="material-symbols-rounded">text_fields</span>
+                  <span>Text Field</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="add-checkbox">
+                  <span class="material-symbols-rounded">check_box</span>
+                  <span>Checkbox</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="add-radio">
+                  <span class="material-symbols-rounded">radio_button_checked</span>
+                  <span>Radio</span>
+                </button>
+              </div>
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="add-dropdown">
+                  <span class="material-symbols-rounded">arrow_drop_down_circle</span>
+                  <span>Dropdown</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="add-signature-field">
+                  <span class="material-symbols-rounded">draw</span>
+                  <span>Signature Field</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Data</div>
+            <div class="ribbon-group-content">
+              <div class="ribbon-btn-stack">
+                <button class="ribbon-btn ribbon-btn-sm" data-action="import-form-data">
+                  <span class="material-symbols-rounded">upload_file</span>
+                  <span>Import Data</span>
+                </button>
+                <button class="ribbon-btn ribbon-btn-sm" data-action="export-form-data">
+                  <span class="material-symbols-rounded">download</span>
+                  <span>Export Data</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONVERT TAB -->
+        <div class="ribbon-panel" data-panel="convert">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Export</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="export-images">
+                <span class="material-symbols-rounded">image</span>
+                <span class="ribbon-btn-label">PDF → Images</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="export-text">
+                <span class="material-symbols-rounded">article</span>
+                <span class="ribbon-btn-label">PDF → Text</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Import</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="images-to-pdf-convert">
+                <span class="material-symbols-rounded">add_photo_alternate</span>
+                <span class="ribbon-btn-label">Images → PDF</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROTECT TAB -->
+        <div class="ribbon-panel" data-panel="protect">
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Password</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="set-password">
+                <span class="material-symbols-rounded">lock</span>
+                <span class="ribbon-btn-label">Set Password</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="set-permissions">
+                <span class="material-symbols-rounded">admin_panel_settings</span>
+                <span class="ribbon-btn-label">Permissions</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Signature</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-signature">
+                <span class="material-symbols-rounded">draw</span>
+                <span class="ribbon-btn-label">Sign Document</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Redaction</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="redact">
+                <span class="material-symbols-rounded">visibility_off</span>
+                <span class="ribbon-btn-label">Redact</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Sanitize</div>
+            <div class="ribbon-group-content">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="remove-hidden-info">
+                <span class="material-symbols-rounded">cleaning_services</span>
+                <span class="ribbon-btn-label">Sanitize Info</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <button class="ribbon-collapse-btn" id="ribbonCollapseBtn" title="Collapse Ribbon">
+        <span class="material-symbols-rounded">expand_less</span>
+      </button>
+    </nav>
+
+    <!-- Text Edit Mode Bar (shown when Edit Text Mode is active) -->
+    <div id="textEditModeBar" class="text-edit-mode-bar hidden">
+      <div class="teb-info">
+        <span class="material-symbols-rounded" style="font-size:16px;">edit_note</span>
+        <span id="tebInfo">Click a text block to select · Drag to move · Double-click to edit text · Click empty area to add new text</span>
+      </div>
+      <div class="teb-format" id="tebFormat">
+        <label class="teb-label">Font</label>
+        <select id="tebFont" class="teb-select teb-font-select" disabled title="Select font">
+          <option value="">— select block —</option>
+        </select>
+        <label class="teb-label">Size</label>
+        <select id="tebSize" class="teb-select" disabled title="Font size">
+          <option value="">—</option>
+        </select>
+        <label class="teb-label">Color</label>
+        <input type="color" id="tebColor" class="teb-color" value="#000000" disabled title="Text color" />
+        <button id="tebDeleteBlock" class="teb-btn teb-btn-danger" disabled title="Delete selected text block">
+          <span class="material-symbols-rounded" style="font-size:15px;">delete</span>
+        </button>
+      </div>
+      <div class="teb-actions">
+        <span id="tebChangeCount" class="teb-change-count" style="display:none;"></span>
+        <button id="tebApplyBtn" class="teb-btn teb-btn-primary" title="Apply all text changes to the PDF">
+          <span class="material-symbols-rounded" style="font-size:15px;">check_circle</span>
+          Apply Changes
+        </button>
+        <button id="tebExitBtn" class="teb-btn" title="Exit text edit mode (discard unapplied changes)">
+          <span class="material-symbols-rounded" style="font-size:15px;">close</span>
+          Exit
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main id="mainContent">
+      <!-- Sidebar -->
+      <aside id="sidebar" class="sidebar-collapsed">
+        <div class="sidebar-tabs">
+          <button class="sidebar-tab active" data-sidebar="thumbnails" title="Page Thumbnails">
+            <span class="material-symbols-rounded">view_module</span>
+          </button>
+          <button class="sidebar-tab" data-sidebar="bookmarks" title="Bookmarks">
+            <span class="material-symbols-rounded">bookmarks</span>
+          </button>
+          <button class="sidebar-tab" data-sidebar="comments" title="Comments">
+            <span class="material-symbols-rounded">comment</span>
+          </button>
+          <button class="sidebar-tab" data-sidebar="search" title="Search">
+            <span class="material-symbols-rounded">search</span>
+          </button>
+        </div>
+        <div class="sidebar-content">
+          <div class="sidebar-panel active" data-sidepanel="thumbnails">
+            <div class="sidebar-panel-header">
+              <h3>Pages</h3>
+              <div style="display:flex; gap:2px; align-items:center;">
+                <button class="sidebar-action-btn" id="btnSidebarAddBlank" title="Add Blank Page After Current Page">
+                  <span class="material-symbols-rounded" style="font-size:18px;">note_add</span>
+                </button>
+                <button class="sidebar-action-btn" id="btnSidebarInsertFile" title="Insert Pages from Another File...">
+                  <span class="material-symbols-rounded" style="font-size:18px;">post_add</span>
+                </button>
+                <button class="sidebar-action-btn" id="btnSidebarRotateCW" title="Rotate Current Page 90° Clockwise">
+                  <span class="material-symbols-rounded" style="font-size:18px;">rotate_right</span>
+                </button>
+                <button class="sidebar-action-btn" id="btnSidebarDeletePage" title="Delete Current Page">
+                  <span class="material-symbols-rounded" style="font-size:18px;">delete</span>
+                </button>
+              </div>
+            </div>
+            <div class="thumbnail-list" id="thumbnailList">
+              <!-- Thumbnails generated dynamically -->
+            </div>
+          </div>
+          <div class="sidebar-panel" data-sidepanel="bookmarks">
+            <div class="sidebar-panel-header">
+              <h3>Bookmarks</h3>
+              <button class="sidebar-action-btn" data-action="add-bookmark" title="Add Bookmark">
+                <span class="material-symbols-rounded">add</span>
+              </button>
+            </div>
+            <div class="bookmark-list" id="bookmarkList">
+              <!-- Bookmarks generated dynamically -->
+            </div>
+          </div>
+          <div class="sidebar-panel" data-sidepanel="comments">
+            <div class="sidebar-panel-header">
+              <h3>Comments</h3>
+            </div>
+            <div class="comment-list" id="commentList">
+              <!-- Comments generated dynamically -->
+            </div>
+          </div>
+          <div class="sidebar-panel" data-sidepanel="search">
+            <div class="sidebar-panel-header">
+              <h3>Search</h3>
+            </div>
+            <div class="search-panel" id="searchPanel">
+              <div class="search-input-wrap">
+                <span class="material-symbols-rounded">search</span>
+                <input type="text" id="searchInput" placeholder="Search text in document..." />
+                <button class="search-btn" id="searchPrev" title="Previous Match">
+                  <span class="material-symbols-rounded">keyboard_arrow_up</span>
+                </button>
+                <button class="search-btn" id="searchNext" title="Next Match">
+                  <span class="material-symbols-rounded">keyboard_arrow_down</span>
+                </button>
+              </div>
+              <div class="search-options">
+                <label><input type="checkbox" id="searchCaseSensitive" /> Match case</label>
+                <label><input type="checkbox" id="searchWholeWord" /> Whole word</label>
+              </div>
+              <div class="search-results" id="searchResults">
+                <!-- Search results -->
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="sidebar-resize-handle" id="sidebarResizeHandle"></div>
+      </aside>
+
+      <!-- PDF Viewer -->
+      <div id="viewerContainer">
+        <!-- Welcome Screen -->
+        <div id="welcomeScreen" class="welcome-screen">
+          <div class="welcome-content">
+            <div class="welcome-icon">
+              <span class="material-symbols-rounded">description</span>
+            </div>
+            <h1>Welcome to <span class="brand">Slash<strong>PDF</strong></span></h1>
+            <p>Free, complete PDF editor. View, edit, merge, convert, annotate, and sign PDF documents right in your browser.</p>
+            <div class="welcome-actions">
+              <button class="welcome-btn primary" id="welcomeOpenBtn">
+                <span class="material-symbols-rounded">folder_open</span>
+                <span>Open PDF</span>
+              </button>
+              <button class="welcome-btn" id="welcomeCreateBtn">
+                <span class="material-symbols-rounded">note_add</span>
+                <span>New Blank PDF</span>
+              </button>
+              <button class="welcome-btn" id="welcomeMergeBtn">
+                <span class="material-symbols-rounded">merge</span>
+                <span>Merge PDFs</span>
+              </button>
+              <button class="welcome-btn" id="welcomeSplitBtn">
+                <span class="material-symbols-rounded">call_split</span>
+                <span>Split PDF</span>
+              </button>
+              <button class="welcome-btn" id="welcomeImgBtn">
+                <span class="material-symbols-rounded">add_photo_alternate</span>
+                <span>Images to PDF</span>
+              </button>
+            </div>
+            <div class="welcome-drop-zone" id="dropZone">
+              <span class="material-symbols-rounded">cloud_upload</span>
+              <p>Drag & drop PDF files or images here</p>
+            </div>
+            <div class="welcome-features">
+              <div class="feature-card">
+                <span class="material-symbols-rounded">edit</span>
+                <h3>Edit</h3>
+                <p>Add text, images, watermark, headers & footers</p>
+              </div>
+              <div class="feature-card">
+                <span class="material-symbols-rounded">merge</span>
+                <h3>Merge & Split</h3>
+                <p>Combine multiple PDFs or extract pages</p>
+              </div>
+              <div class="feature-card">
+                <span class="material-symbols-rounded">rate_review</span>
+                <h3>Annotate</h3>
+                <p>Highlight, notes, stamps, and drawings</p>
+              </div>
+              <div class="feature-card">
+                <span class="material-symbols-rounded">lock</span>
+                <h3>Security</h3>
+                <p>Password protection, redaction, and sanitizing</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PDF Canvas Area -->
+        <div id="pdfViewer" class="pdf-viewer hidden">
+          <div class="viewer-toolbar" id="viewerToolbar">
+            <div class="viewer-toolbar-left">
+              <button class="vt-btn" id="btnPrevPage" title="Previous Page">
+                <span class="material-symbols-rounded">chevron_left</span>
+              </button>
+              <div class="page-input-wrap">
+                <input type="number" id="pageInput" min="1" value="1" />
+                <span>/</span>
+                <span id="totalPages">0</span>
+              </div>
+              <button class="vt-btn" id="btnNextPage" title="Next Page">
+                <span class="material-symbols-rounded">chevron_right</span>
+              </button>
+            </div>
+            <div class="viewer-toolbar-center">
+              <button class="vt-btn" id="btnZoomOut" title="Zoom Out">
+                <span class="material-symbols-rounded">zoom_out</span>
+              </button>
+              <select id="zoomSelect" class="zoom-select">
+                <option value="0.5">50%</option>
+                <option value="0.75">75%</option>
+                <option value="1" selected>100%</option>
+                <option value="1.25">125%</option>
+                <option value="1.5">150%</option>
+                <option value="2">200%</option>
+                <option value="3">300%</option>
+                <option value="fit-width">Fit Width</option>
+                <option value="fit-page">Fit Page</option>
+              </select>
+              <button class="vt-btn" id="btnZoomIn" title="Zoom In">
+                <span class="material-symbols-rounded">zoom_in</span>
+              </button>
+            </div>
+            <div class="viewer-toolbar-right">
+              <button class="vt-btn active" id="btnHandTool" title="Hand Tool">
+                <span class="material-symbols-rounded">pan_tool</span>
+              </button>
+              <button class="vt-btn" id="btnSelectTool" title="Text Select Tool">
+                <span class="material-symbols-rounded">text_select_move_forward_word</span>
+              </button>
+              <div class="vt-separator"></div>
+              <button class="vt-btn" id="btnSinglePage" title="Single Page">
+                <span class="material-symbols-rounded">article</span>
+              </button>
+              <button class="vt-btn active" id="btnContinuous" title="Continuous Scroll">
+                <span class="material-symbols-rounded">view_day</span>
+              </button>
+              <button class="vt-btn" id="btnTwoPage" title="Two Pages">
+                <span class="material-symbols-rounded">auto_stories</span>
+              </button>
+            </div>
+          </div>
+          <div class="pdf-pages-container" id="pdfPagesContainer">
+            <!-- PDF pages will be rendered here -->
+          </div>
+          <!-- Annotation overlay layer -->
+          <canvas id="annotationCanvas" class="annotation-canvas hidden"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <!-- Status Bar -->
+    <footer id="statusBar">
+      <div class="status-left">
+        <span id="statusMessage">Ready</span>
+      </div>
+      <div class="status-center">
+        <span id="statusFileInfo"></span>
+      </div>
+      <div class="status-right">
+        <span id="statusZoom">100%</span>
+      </div>
+    </footer>
+
+    <!-- Dialogs Container -->
+    <div id="dialogOverlay" class="dialog-overlay hidden"></div>
+    <div id="dialogContainer"></div>
+
+    <!-- Notifications -->
+    <div id="notificationContainer" class="notification-container"></div>
+
+    <!-- Hidden file inputs -->
+    <input type="file" id="fileInput" accept=".pdf" multiple hidden />
+    <input type="file" id="imageInput" accept=".jpg,.jpeg,.png,.tiff,.tif,.bmp,.gif,.webp" multiple hidden />
+    <input type="file" id="mergeInput" accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif" multiple hidden />
+    <input type="file" id="insertPagesInput" accept=".pdf" hidden />
+    <input type="file" id="signatureImageInput" accept=".png,.jpg,.jpeg" hidden />
+  </div>
+
+  <!-- Dedicated Print Container (rendered only during printing) -->
+  <div id="printContainer" class="print-only"></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
