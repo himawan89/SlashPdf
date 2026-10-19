@@ -15,6 +15,17 @@ export interface PDFDocumentItem {
   annotations: PageAnnotation[];
   bookmarks: PDFBookmark[];
   comments: PDFComment[];
+  history?: DocumentHistorySnapshot[];
+  historyIndex?: number;
+}
+
+export interface DocumentHistorySnapshot {
+  fileBytes: Uint8Array;
+  annotations: PageAnnotation[];
+  bookmarks: PDFBookmark[];
+  comments: PDFComment[];
+  currentPage: number;
+  description?: string;
 }
 
 export type AnnotationType = 

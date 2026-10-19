@@ -95,6 +95,196 @@ export class PDFViewerManager {
   }
 
   /**
+   * Render interactive link annotations (external URLs and internal page jumps)
+   */
+  static async renderAnnotationLinks(
+    page: any,
+    viewport: any,
+    container: HTMLElement,
+    pdfDocProxy: any,
+    onNavigate: (targetPageNum: number) => void
+  ): Promise<HTMLElement | null> {
+    try {
+      const annotations = await page.getAnnotations();
+      const linkAnnots = annotations.filter((a: any) => a.subtype === 'Link');
+      if (linkAnnots.length === 0) return null;
+
+      let linkLayer = container.querySelector('.annotation-link-layer') as HTMLElement | null;
+      if (!linkLayer) {
+        linkLayer = document.createElement('div');
+        linkLayer.className = 'annotation-link-layer';
+        container.appendChild(linkLayer);
+      }
+      linkLayer.innerHTML = '';
+
+      for (const a of linkAnnots) {
+        if (!a.rect || a.rect.length < 4) continue;
+
+        // Convert PDF rect [x1,y1,x2,y2] to viewport coordinates robustly
+        let left: number, top: number, width: number, height: number;
+        if (typeof viewport.convertToViewportRectangle === 'function') {
+          const rect = viewport.convertToViewportRectangle(a.rect);
+          left = Math.min(rect[0], rect[2]);
+          top = Math.min(rect[1], rect[3]);
+          width = Math.max(8, Math.abs(rect[2] - rect[0]));
+          height = Math.max(8, Math.abs(rect[3] - rect[1]));
+        } else if (typeof viewport.convertToViewportPoint === 'function') {
+          const p1 = viewport.convertToViewportPoint(a.rect[0], a.rect[1]);
+          const p2 = viewport.convertToViewportPoint(a.rect[2], a.rect[3]);
+          left = Math.min(p1[0], p2[0]);
+          top = Math.min(p1[1], p2[1]);
+          width = Math.max(8, Math.abs(p2[0] - p1[0]));
+          height = Math.max(8, Math.abs(p2[1] - p1[1]));
+        } else {
+          // Manual fallback using viewport transform matrix
+          const tx = viewport.transform;
+          if (tx) {
+            const x1 = tx[0] * a.rect[0] + tx[2] * a.rect[1] + tx[4];
+            const y1 = tx[1] * a.rect[0] + tx[3] * a.rect[1] + tx[5];
+            const x2 = tx[0] * a.rect[2] + tx[2] * a.rect[3] + tx[4];
+            const y2 = tx[1] * a.rect[2] + tx[3] * a.rect[3] + tx[5];
+            left = Math.min(x1, x2);
+            top = Math.min(y1, y2);
+            width = Math.max(8, Math.abs(x2 - x1));
+            height = Math.max(8, Math.abs(y2 - y1));
+          } else {
+            // Last resort: use raw scale
+            const s = viewport.scale || 1;
+            const ph = viewport.height || 0;
+            left = a.rect[0] * s;
+            top = ph - a.rect[3] * s;
+            width = Math.max(8, (a.rect[2] - a.rect[0]) * s);
+            height = Math.max(8, (a.rect[3] - a.rect[1]) * s);
+          }
+        }
+
+        const linkEl = document.createElement('a');
+        linkEl.className = 'pdf-interactive-link';
+        linkEl.style.left = `${left}px`;
+        linkEl.style.top = `${top}px`;
+        linkEl.style.width = `${width}px`;
+        linkEl.style.height = `${height}px`;
+
+        // Prevent container panning / text selection from intercepting link interaction
+        linkEl.addEventListener('mousedown', (e) => e.stopPropagation());
+        linkEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+
+        const rawUrl = a.url || a.unsafeUrl;
+        if (rawUrl) {
+          const href = rawUrl.startsWith('http://') || rawUrl.startsWith('https://') || rawUrl.startsWith('mailto:')
+            ? rawUrl
+            : `https://${rawUrl}`;
+          linkEl.href = href;
+          linkEl.target = '_blank';
+          linkEl.rel = 'noopener noreferrer';
+          linkEl.title = `Buka tautan: ${rawUrl}`;
+          linkEl.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.open(href, '_blank', 'noopener,noreferrer');
+          });
+        } else {
+          // Resolve page jump destination from multiple possible sources
+          let targetPageIndex: number | null = null;
+
+          // Helper to resolve a destination array to page index
+          const resolveDestArray = async (destArr: any[]): Promise<number | null> => {
+            if (!destArr || destArr.length === 0) return null;
+            const first = destArr[0];
+            if (typeof first === 'number') return first;
+            if (first && typeof first === 'object') {
+              try {
+                return await pdfDocProxy.getPageIndex(first);
+              } catch {
+                // Brute-force: compare ref num/gen if available
+                if (first.num !== undefined || first.gen !== undefined) {
+                  const numPages = pdfDocProxy.numPages;
+                  for (let pi = 0; pi < numPages; pi++) {
+                    try {
+                      const pg = await pdfDocProxy.getPage(pi + 1);
+                      if (pg.ref && pg.ref.num === first.num && pg.ref.gen === first.gen) {
+                        return pi;
+                      }
+                    } catch { /* skip */ }
+                  }
+                }
+                return null;
+              }
+            }
+            return null;
+          };
+
+          // Try a.dest (standard Dest field)
+          if (a.dest) {
+            try {
+              let destVal = a.dest;
+              if (typeof destVal === 'string') {
+                destVal = await pdfDocProxy.getDestination(destVal);
+              }
+              if (Array.isArray(destVal)) {
+                targetPageIndex = await resolveDestArray(destVal);
+              }
+            } catch { /* fallback below */ }
+          }
+
+          // Try GoTo action destination (pdf-lib generates A: { S: 'GoTo', D: [...] })
+          if (targetPageIndex === null && a.action === 'GoTo' && a.dest) {
+            try {
+              let destVal = a.dest;
+              if (typeof destVal === 'string') {
+                destVal = await pdfDocProxy.getDestination(destVal);
+              }
+              if (Array.isArray(destVal)) {
+                targetPageIndex = await resolveDestArray(destVal);
+              }
+            } catch { /* fallback below */ }
+          }
+
+          // Try raw annotation data for GoTo actions parsed differently by pdf.js
+          if (targetPageIndex === null && a.newWindow === false && a.dest) {
+            try {
+              if (Array.isArray(a.dest)) {
+                targetPageIndex = await resolveDestArray(a.dest);
+              }
+            } catch { /* ignore */ }
+          }
+
+          if (targetPageIndex !== null && !isNaN(targetPageIndex) && targetPageIndex >= 0) {
+            const pageNum = targetPageIndex + 1;
+            linkEl.title = `Go to Page ${pageNum}`;
+            linkEl.href = `#page=${pageNum}`;
+            linkEl.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onNavigate(pageNum);
+            });
+          } else if (a.action === 'NextPage') {
+            linkEl.title = 'Next Page';
+            linkEl.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onNavigate(page.pageNumber + 1);
+            });
+          } else if (a.action === 'PrevPage') {
+            linkEl.title = 'Previous Page';
+            linkEl.addEventListener('click', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onNavigate(Math.max(1, page.pageNumber - 1));
+            });
+          }
+        }
+
+        linkLayer.appendChild(linkEl);
+      }
+      return linkLayer;
+    } catch (err) {
+      console.warn('Failed to render annotation links:', err);
+      return null;
+    }
+  }
+
+  /**
    * Render thumbnail for a page
    */
   static async renderThumbnail(
@@ -212,7 +402,7 @@ export class PDFViewerManager {
   }
 
   /**
-   * Search text across all pages
+   * Search text across all pages and calculate bounding box rectangles for on-page highlights
    */
   static async searchDocument(
     pdfDoc: any,
@@ -222,21 +412,34 @@ export class PDFViewerManager {
   ): Promise<SearchResult[]> {
     if (!query || !query.trim()) return [];
     const results: SearchResult[] = [];
-    const q = caseSensitive ? query : query.toLowerCase();
+    const q = caseSensitive ? query.trim() : query.trim().toLowerCase();
 
     for (let i = 1; i <= pdfDoc.numPages; i++) {
       const page = await pdfDoc.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map((it: any) => it.str).join(' ');
-      const textToSearch = caseSensitive ? pageText : pageText.toLowerCase();
+      const items = (content.items as any[]).filter((it) => it.str);
 
+      let fullText = '';
+      const itemOffsets: { start: number; end: number; item: any; fontSize: number }[] = [];
+
+      for (const it of items) {
+        const [a, b] = it.transform;
+        const fontSize = Math.max(4, Math.round(Math.sqrt(a * a + b * b)));
+        const start = fullText.length;
+        fullText += it.str + ' ';
+        itemOffsets.push({ start, end: start + it.str.length, item: it, fontSize });
+      }
+
+      const textToSearch = caseSensitive ? fullText : fullText.toLowerCase();
       let matchIndex = 0;
       let startPos = 0;
 
       while ((startPos = textToSearch.indexOf(q, startPos)) !== -1) {
+        const matchEnd = startPos + q.length;
+
         if (wholeWord) {
           const before = startPos === 0 ? ' ' : textToSearch[startPos - 1];
-          const after = startPos + q.length >= textToSearch.length ? ' ' : textToSearch[startPos + q.length];
+          const after = matchEnd >= textToSearch.length ? ' ' : textToSearch[matchEnd];
           const isWordBoundary = /\W/.test(before) && /\W/.test(after);
           if (!isWordBoundary) {
             startPos += q.length;
@@ -244,14 +447,34 @@ export class PDFViewerManager {
           }
         }
 
-        const snippetStart = Math.max(0, startPos - 30);
-        const snippetEnd = Math.min(pageText.length, startPos + q.length + 30);
-        const snippet = '...' + pageText.substring(snippetStart, snippetEnd) + '...';
+        const snippetStart = Math.max(0, startPos - 35);
+        const snippetEnd = Math.min(fullText.length, matchEnd + 35);
+        const rawSnippet = fullText.substring(snippetStart, snippetEnd).trim();
+        const snippet = (snippetStart > 0 ? '...' : '') + rawSnippet + (snippetEnd < fullText.length ? '...' : '');
+
+        // Calculate bounding boxes for this match across overlapping text items
+        const rects: { x: number; y: number; width: number; height: number }[] = [];
+        for (const io of itemOffsets) {
+          if (io.end > startPos && io.start < matchEnd) {
+            const subStart = Math.max(0, startPos - io.start);
+            const subEnd = Math.min(io.item.str.length, matchEnd - io.start);
+            if (subEnd > subStart) {
+              const itW = io.item.width > 0 ? io.item.width : io.fontSize * io.item.str.length * 0.55;
+              const charW = io.item.str.length > 0 ? itW / io.item.str.length : io.fontSize * 0.55;
+              const rx = io.item.transform[4] + subStart * charW;
+              const ry = io.item.transform[5] - io.fontSize * 0.22;
+              const rw = Math.max(4, (subEnd - subStart) * charW);
+              const rh = io.fontSize * 1.35;
+              rects.push({ x: rx, y: ry, width: rw, height: rh });
+            }
+          }
+        }
 
         results.push({
           pageIndex: i - 1,
           matchIndex,
           text: snippet,
+          rects,
         });
 
         matchIndex++;
@@ -262,3 +485,4 @@ export class PDFViewerManager {
     return results;
   }
 }
+

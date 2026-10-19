@@ -225,9 +225,11 @@ export class UIDialogs {
   }
 
   /**
-   * Header & Footer / Bates Numbering Dialog
+   * Header & Footer / Page Numbers / Bates Numbering Dialog
+   * Provides preset dropdowns for Page Numbers and Bates Numbering,
+   * position selection, and dynamic live page preview.
    */
-  static async promptHeaderFooter(isBates = false): Promise<{
+  static async promptHeaderFooter(isBates = false, totalPages = 1): Promise<{
     headerLeft: string;
     headerCenter: string;
     headerRight: string;
@@ -238,69 +240,507 @@ export class UIDialogs {
     prefix: string;
     isBates: boolean;
     batesDigits: number;
+    fontSize?: number;
   } | null> {
-    const title = isBates ? 'Bates Numbering' : 'Header, Footer & Page Numbers';
-    const html = `
-      <div class="dialog-modal">
+    const totalCount = Math.max(1, totalPages);
+    let activeMode: string = isBates ? 'bates' : 'page';
+
+    const modalHtml = `
+      <div class="dialog-modal" style="max-width: 580px; width: 95%;">
         <div class="dialog-header">
-          <h3><span class="material-symbols-rounded">format_list_numbered</span> ${title}</h3>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="material-symbols-rounded" style="color:var(--primary); font-size:22px;">format_list_numbered</span>
+            <div>
+              <h3 style="margin:0; font-size:14px; font-weight:600;" id="hfDialogTitle">
+                ${isBates ? 'Bates Numbering (Legal / Audit)' : 'Page Numbers & Header / Footer'}
+              </h3>
+              <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted); font-weight:normal;">
+                Configure page numbering or legal Bates indexing with instant presets
+              </p>
+            </div>
+          </div>
           <button class="dialog-close-btn" title="Close"><span class="material-symbols-rounded">close</span></button>
         </div>
-        <div class="dialog-body">
-          <p style="font-size:12px; color:var(--text-muted);">
-            Available variables: <code>{page}</code> (page number), <code>{total}</code> (total pages), <code>{prefix}</code> (bates prefix).
-          </p>
-          ${isBates ? `
-            <div style="display:flex; gap:12px;">
-              <div class="form-group" style="flex:1;">
-                <label>Bates Prefix</label>
-                <input type="text" id="batesPrefix" value="DOC-" />
+
+        <div class="dialog-body" style="padding: 14px 18px; max-height: 80vh; overflow-y: auto; display:flex; flex-direction:column; gap:12px;">
+          <!-- Mode Tabs -->
+          <div class="hf-mode-tabs">
+            <button type="button" class="hf-mode-tab ${activeMode === 'page' ? 'active' : ''}" data-hf-tab="page">
+              <span class="material-symbols-rounded" style="font-size:16px;">format_list_numbered</span>
+              <span>Page Numbers</span>
+            </button>
+            <button type="button" class="hf-mode-tab ${activeMode === 'bates' ? 'active' : ''}" data-hf-tab="bates">
+              <span class="material-symbols-rounded" style="font-size:16px;">pin</span>
+              <span>Bates Numbering</span>
+            </button>
+            <button type="button" class="hf-mode-tab ${(activeMode as string) === 'custom' ? 'active' : ''}" data-hf-tab="custom">
+              <span class="material-symbols-rounded" style="font-size:16px;">view_quilt</span>
+              <span>Custom Header & Footer</span>
+            </button>
+          </div>
+
+          <!-- PANEL 1: Page Numbers -->
+          <div id="hfPanelPage" style="display:${activeMode === 'page' ? 'flex' : 'none'}; flex-direction:column; gap:10px;">
+            <div class="form-group">
+              <label style="display:flex; justify-content:space-between; align-items:center;">
+                <span>Page Number Format</span>
+                <span style="font-size:11px; color:var(--text-muted); font-weight:normal;">Choose preset format</span>
+              </label>
+              <select id="hfPageFormatSelect">
+                <option value="Page {page} of {total}" selected>Page 1 of ${totalCount} (Standard)</option>
+                <option value="{page} of {total}">1 of ${totalCount} (Compact)</option>
+                <option value="{page} / {total}">1 / ${totalCount} (Slash)</option>
+                <option value="Page {page}">Page 1</option>
+                <option value="{page}">1 (Number only)</option>
+                <option value="custom">-- Custom Format... --</option>
+              </select>
+            </div>
+            <div class="form-group" id="hfPageCustomWrap" style="display:none;">
+              <label>Custom Template (Use {page} and {total} tags)</label>
+              <input type="text" id="hfPageCustomInput" value="Page {page} of {total}" placeholder="e.g. Document - Page {page} of {total}" />
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div class="form-group">
+                <label>Position</label>
+                <select id="hfPagePositionSelect">
+                  <option value="bottom-center" selected>Bottom — Center (Footer Center)</option>
+                  <option value="bottom-right">Bottom — Right (Footer Right)</option>
+                  <option value="bottom-left">Bottom — Left (Footer Left)</option>
+                  <option value="top-center">Top — Center (Header Center)</option>
+                  <option value="top-right">Top — Right (Header Right)</option>
+                  <option value="top-left">Top — Left (Header Left)</option>
+                </select>
               </div>
-              <div class="form-group" style="flex:1;">
-                <label>Number of Digits</label>
-                <input type="number" id="batesDigits" value="6" min="3" max="10" />
+              <div class="form-group">
+                <label>Start at Page</label>
+                <input type="number" id="hfPageStartInput" value="1" min="1" />
               </div>
             </div>
-          ` : ''}
-          <div style="font-weight:600; font-size:12px; margin-top:4px;">Header (Top)</div>
-          <div style="display:flex; gap:8px;">
-            <input type="text" id="hfHL" placeholder="Left" style="flex:1; padding:6px; font-size:12px;" />
-            <input type="text" id="hfHC" placeholder="Center" style="flex:1; padding:6px; font-size:12px;" />
-            <input type="text" id="hfHR" placeholder="Right" style="flex:1; padding:6px; font-size:12px;" />
+
+            <div class="form-group">
+              <label>Font Size</label>
+              <select id="hfPageFontSize">
+                <option value="8">8 pt (Small)</option>
+                <option value="9" selected>9 pt (Standard)</option>
+                <option value="10">10 pt (Medium)</option>
+                <option value="11">11 pt (Large)</option>
+                <option value="12">12 pt (Extra Large)</option>
+              </select>
+            </div>
           </div>
-          <div style="font-weight:600; font-size:12px; margin-top:8px;">Footer (Bottom)</div>
-          <div style="display:flex; gap:8px;">
-            <input type="text" id="hfFL" placeholder="Left" style="flex:1; padding:6px; font-size:12px;" />
-            <input type="text" id="hfFC" placeholder="Center: Page {page} of {total}" value="Page {page} of {total}" style="flex:1; padding:6px; font-size:12px;" />
-            <input type="text" id="hfFR" placeholder="Right" style="flex:1; padding:6px; font-size:12px;" />
+
+          <!-- PANEL 2: Bates Numbering -->
+          <div id="hfPanelBates" style="display:${activeMode === 'bates' ? 'flex' : 'none'}; flex-direction:column; gap:10px;">
+            <div style="background:var(--primary-light, rgba(255,107,74,0.1)); border:1px solid var(--border-subtle); padding:8px 12px; border-radius:6px; font-size:11.5px; line-height:1.4; color:var(--text-main);">
+              <strong>Bates Numbering:</strong> Standard sequential indexing used for legal discovery, audit trails, and court evidence with a prefix and fixed zero-padded digits.
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div class="form-group">
+                <label>Bates Prefix (Case / Document Code)</label>
+                <input type="text" id="batesPrefixInput" value="DOC-" placeholder="e.g. DOC-, EXHIBIT-, CONF-" />
+              </div>
+              <div class="form-group">
+                <label>Number of Digits (Zero Padding)</label>
+                <select id="batesDigitsSelect">
+                  <option value="6" selected>6 Digits (DOC-000001)</option>
+                  <option value="5">5 Digits (DOC-00001)</option>
+                  <option value="4">4 Digits (DOC-0001)</option>
+                  <option value="7">7 Digits (DOC-0000001)</option>
+                  <option value="8">8 Digits (DOC-00000001)</option>
+                  <option value="3">3 Digits (DOC-001)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label style="display:flex; justify-content:space-between; align-items:center;">
+                <span>Bates Format</span>
+                <span style="font-size:11px; color:var(--text-muted); font-weight:normal;">Choose legal format preset</span>
+              </label>
+              <select id="batesFormatSelect">
+                <option value="{prefix}{page}" selected>{prefix}000001 (Standard Legal Bates)</option>
+                <option value="{prefix}{page} of {total}">{prefix}000001 of ${totalCount} (With Page Count)</option>
+                <option value="CONFIDENTIAL — {prefix}{page}">CONFIDENTIAL — {prefix}000001</option>
+                <option value="EXHIBIT {prefix}{page}">EXHIBIT {prefix}000001</option>
+                <option value="AUDIT-{prefix}{page}">AUDIT-{prefix}000001</option>
+                <option value="custom">-- Custom Format... --</option>
+              </select>
+            </div>
+            <div class="form-group" id="batesCustomWrap" style="display:none;">
+              <label>Custom Bates Template ({prefix}, {page}, {total})</label>
+              <input type="text" id="batesCustomInput" value="{prefix}{page}" placeholder="e.g. CASE-{prefix}{page}" />
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div class="form-group">
+                <label>Bates Position</label>
+                <select id="batesPositionSelect">
+                  <option value="bottom-right" selected>Bottom — Right (Bates Standard)</option>
+                  <option value="bottom-center">Bottom — Center (Footer Center)</option>
+                  <option value="bottom-left">Bottom — Left (Footer Left)</option>
+                  <option value="top-right">Top — Right (Header Right)</option>
+                  <option value="top-center">Top — Center (Header Center)</option>
+                  <option value="top-left">Top — Left (Header Left)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Start Number</label>
+                <input type="number" id="batesStartInput" value="1" min="1" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Font Size</label>
+              <select id="batesFontSize">
+                <option value="8">8 pt (Small)</option>
+                <option value="9">9 pt (Standard)</option>
+                <option value="10" selected>10 pt (Medium)</option>
+                <option value="11">11 pt (Large)</option>
+                <option value="12">12 pt (Extra Large)</option>
+              </select>
+            </div>
           </div>
-          <div class="form-group" style="margin-top:6px;">
-            <label>Start Numbering From</label>
-            <input type="number" id="hfStart" value="1" min="1" />
+
+          <!-- PANEL 3: Custom Header & Footer (6 Manual Positions) -->
+          <div id="hfPanelCustom" style="display:${(activeMode as string) === 'custom' ? 'flex' : 'none'}; flex-direction:column; gap:10px;">
+            <p style="font-size:11.5px; color:var(--text-muted); margin:0;">
+              Enter text directly into the desired positions. Use the quick tags below to insert variables.
+            </p>
+
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+              <button type="button" class="dialog-btn hf-tag-btn" data-insert="{page}" style="padding:3px 8px; font-size:11px;">+ {page} Page Number</button>
+              <button type="button" class="dialog-btn hf-tag-btn" data-insert="{total}" style="padding:3px 8px; font-size:11px;">+ {total} Total Pages</button>
+              <button type="button" class="dialog-btn hf-tag-btn" data-insert="{prefix}" style="padding:3px 8px; font-size:11px;">+ {prefix} Prefix</button>
+            </div>
+
+            <div style="font-weight:600; font-size:12px; margin-top:2px;">Header (Top)</div>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="hfHL" placeholder="Left" style="flex:1; padding:6px; font-size:12px;" />
+              <input type="text" id="hfHC" placeholder="Center" style="flex:1; padding:6px; font-size:12px;" />
+              <input type="text" id="hfHR" placeholder="Right" style="flex:1; padding:6px; font-size:12px;" />
+            </div>
+
+            <div style="font-weight:600; font-size:12px; margin-top:4px;">Footer (Bottom)</div>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="hfFL" placeholder="Left" style="flex:1; padding:6px; font-size:12px;" />
+              <input type="text" id="hfFC" placeholder="Center" value="Page {page} of {total}" style="flex:1; padding:6px; font-size:12px;" />
+              <input type="text" id="hfFR" placeholder="Right" style="flex:1; padding:6px; font-size:12px;" />
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:4px;">
+              <div class="form-group">
+                <label>Start at Page</label>
+                <input type="number" id="hfStart" value="1" min="1" />
+              </div>
+              <div class="form-group">
+                <label>Font Size</label>
+                <select id="hfCustomFontSize">
+                  <option value="8">8 pt</option>
+                  <option value="9" selected>9 pt (Standard)</option>
+                  <option value="10">10 pt</option>
+                  <option value="11">11 pt</option>
+                  <option value="12">12 pt</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- LIVE VISUAL PREVIEW -->
+          <div class="hf-preview-box">
+            <div class="hf-preview-box-header">
+              <span>PAGE PREVIEW</span>
+              <span id="hfPreviewModeTag" class="hf-badge-info">Page Numbers</span>
+            </div>
+            <div class="hf-mini-page">
+              <div class="hf-mini-page-header">
+                <div class="hf-mini-slot left" id="hfPrevTL"></div>
+                <div class="hf-mini-slot center" id="hfPrevTC"></div>
+                <div class="hf-mini-slot right" id="hfPrevTR"></div>
+              </div>
+
+              <div class="hf-mini-page-content">
+                <div class="hf-skeleton-line" style="width: 80%;"></div>
+                <div class="hf-skeleton-line" style="width: 95%;"></div>
+                <div class="hf-skeleton-line" style="width: 65%;"></div>
+              </div>
+
+              <div class="hf-mini-page-footer">
+                <div class="hf-mini-slot left" id="hfPrevBL"></div>
+                <div class="hf-mini-slot center" id="hfPrevBC"></div>
+                <div class="hf-mini-slot right" id="hfPrevBR"></div>
+              </div>
+            </div>
           </div>
         </div>
+
         <div class="dialog-footer">
           <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
-          <button class="dialog-btn primary" data-dialog-action="confirm">Apply</button>
+          <button class="dialog-btn primary" data-dialog-action="confirm" style="display:inline-flex; align-items:center; gap:6px;">
+            <span class="material-symbols-rounded" style="font-size:16px;">check</span> Apply Numbers
+          </button>
         </div>
       </div>
     `;
 
-    const confirmed = await this.show(html);
-    if (!confirmed) return null;
+    return new Promise((resolve) => {
+      this.container.innerHTML = modalHtml;
+      this.overlay.classList.remove('hidden');
 
-    return {
-      headerLeft: (document.getElementById('hfHL') as HTMLInputElement).value,
-      headerCenter: (document.getElementById('hfHC') as HTMLInputElement).value,
-      headerRight: (document.getElementById('hfHR') as HTMLInputElement).value,
-      footerLeft: (document.getElementById('hfFL') as HTMLInputElement).value,
-      footerCenter: (document.getElementById('hfFC') as HTMLInputElement).value,
-      footerRight: (document.getElementById('hfFR') as HTMLInputElement).value,
-      startPage: parseInt((document.getElementById('hfStart') as HTMLInputElement).value, 10) || 1,
-      prefix: isBates ? (document.getElementById('batesPrefix') as HTMLInputElement).value : '',
-      isBates,
-      batesDigits: isBates ? parseInt((document.getElementById('batesDigits') as HTMLInputElement).value, 10) || 6 : 6,
-    };
+      // Elements
+      const tabBtns = this.container.querySelectorAll<HTMLButtonElement>('.hf-mode-tab');
+      const panelPage = document.getElementById('hfPanelPage')!;
+      const panelBates = document.getElementById('hfPanelBates')!;
+      const panelCustom = document.getElementById('hfPanelCustom')!;
+      const modeTag = document.getElementById('hfPreviewModeTag')!;
+      const dialogTitle = document.getElementById('hfDialogTitle')!;
+
+      // Slots
+      const slotTL = document.getElementById('hfPrevTL')!;
+      const slotTC = document.getElementById('hfPrevTC')!;
+      const slotTR = document.getElementById('hfPrevTR')!;
+      const slotBL = document.getElementById('hfPrevBL')!;
+      const slotBC = document.getElementById('hfPrevBC')!;
+      const slotBR = document.getElementById('hfPrevBR')!;
+      const allSlots = [slotTL, slotTC, slotTR, slotBL, slotBC, slotBR];
+
+      const clearSlots = () => {
+        allSlots.forEach((s) => {
+          s.textContent = '';
+          s.classList.remove('highlight');
+        });
+      };
+
+      const updatePreview = () => {
+        clearSlots();
+
+        if (activeMode === 'page') {
+          modeTag.textContent = 'Page Numbers';
+          const formatSelect = document.getElementById('hfPageFormatSelect') as HTMLSelectElement;
+          const customWrap = document.getElementById('hfPageCustomWrap') as HTMLDivElement;
+          const customInput = document.getElementById('hfPageCustomInput') as HTMLInputElement;
+          const isCustom = formatSelect.value === 'custom';
+          customWrap.style.display = isCustom ? 'flex' : 'none';
+
+          const template = isCustom ? customInput.value : formatSelect.value;
+          const startNum = parseInt((document.getElementById('hfPageStartInput') as HTMLInputElement).value, 10) || 1;
+          const text = template
+            .replace(/\{page\}/g, String(startNum))
+            .replace(/\{total\}/g, String(totalCount));
+
+          const pos = (document.getElementById('hfPagePositionSelect') as HTMLSelectElement).value;
+          let targetSlot = slotBC;
+          if (pos === 'bottom-center') targetSlot = slotBC;
+          else if (pos === 'bottom-right') targetSlot = slotBR;
+          else if (pos === 'bottom-left') targetSlot = slotBL;
+          else if (pos === 'top-center') targetSlot = slotTC;
+          else if (pos === 'top-right') targetSlot = slotTR;
+          else if (pos === 'top-left') targetSlot = slotTL;
+
+          targetSlot.textContent = text;
+          targetSlot.classList.add('highlight');
+
+        } else if (activeMode === 'bates') {
+          modeTag.textContent = 'Bates Numbering';
+          const formatSelect = document.getElementById('batesFormatSelect') as HTMLSelectElement;
+          const customWrap = document.getElementById('batesCustomWrap') as HTMLDivElement;
+          const customInput = document.getElementById('batesCustomInput') as HTMLInputElement;
+          const isCustom = formatSelect.value === 'custom';
+          customWrap.style.display = isCustom ? 'flex' : 'none';
+
+          const template = isCustom ? customInput.value : formatSelect.value;
+          const prefix = (document.getElementById('batesPrefixInput') as HTMLInputElement).value || '';
+          const digits = parseInt((document.getElementById('batesDigitsSelect') as HTMLSelectElement).value, 10) || 6;
+          const startNum = parseInt((document.getElementById('batesStartInput') as HTMLInputElement).value, 10) || 1;
+          const numStr = String(startNum).padStart(digits, '0');
+
+          const text = template
+            .replace(/\{prefix\}/g, prefix)
+            .replace(/\{page\}/g, numStr)
+            .replace(/\{total\}/g, String(totalCount));
+
+          const pos = (document.getElementById('batesPositionSelect') as HTMLSelectElement).value;
+          let targetSlot = slotBR;
+          if (pos === 'bottom-right') targetSlot = slotBR;
+          else if (pos === 'bottom-center') targetSlot = slotBC;
+          else if (pos === 'bottom-left') targetSlot = slotBL;
+          else if (pos === 'top-right') targetSlot = slotTR;
+          else if (pos === 'top-center') targetSlot = slotTC;
+          else if (pos === 'top-left') targetSlot = slotTL;
+
+          targetSlot.textContent = text;
+          targetSlot.classList.add('highlight');
+
+        } else if (activeMode === 'custom') {
+          modeTag.textContent = 'Custom Header/Footer';
+          const startNum = parseInt((document.getElementById('hfStart') as HTMLInputElement).value, 10) || 1;
+          const formatCustom = (val: string) =>
+            val.replace(/\{page\}/g, String(startNum)).replace(/\{total\}/g, String(totalCount)).replace(/\{prefix\}/g, 'DOC-');
+
+          const hl = (document.getElementById('hfHL') as HTMLInputElement).value;
+          const hc = (document.getElementById('hfHC') as HTMLInputElement).value;
+          const hr = (document.getElementById('hfHR') as HTMLInputElement).value;
+          const fl = (document.getElementById('hfFL') as HTMLInputElement).value;
+          const fc = (document.getElementById('hfFC') as HTMLInputElement).value;
+          const fr = (document.getElementById('hfFR') as HTMLInputElement).value;
+
+          if (hl) { slotTL.textContent = formatCustom(hl); slotTL.classList.add('highlight'); }
+          if (hc) { slotTC.textContent = formatCustom(hc); slotTC.classList.add('highlight'); }
+          if (hr) { slotTR.textContent = formatCustom(hr); slotTR.classList.add('highlight'); }
+          if (fl) { slotBL.textContent = formatCustom(fl); slotBL.classList.add('highlight'); }
+          if (fc) { slotBC.textContent = formatCustom(fc); slotBC.classList.add('highlight'); }
+          if (fr) { slotBR.textContent = formatCustom(fr); slotBR.classList.add('highlight'); }
+        }
+      };
+
+      // Tab switching
+      tabBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          tabBtns.forEach((b) => b.classList.remove('active'));
+          btn.classList.add('active');
+          activeMode = btn.dataset.hfTab as any;
+
+          panelPage.style.display = activeMode === 'page' ? 'flex' : 'none';
+          panelBates.style.display = activeMode === 'bates' ? 'flex' : 'none';
+          panelCustom.style.display = activeMode === 'custom' ? 'flex' : 'none';
+
+          if (activeMode === 'page') dialogTitle.textContent = 'Page Numbers & Header / Footer';
+          else if (activeMode === 'bates') dialogTitle.textContent = 'Bates Numbering (Legal / Audit)';
+          else dialogTitle.textContent = 'Custom Header & Footer';
+
+          updatePreview();
+        });
+      });
+
+      // Listen to inputs
+      this.container.querySelectorAll('input, select').forEach((el) => {
+        el.addEventListener('input', updatePreview);
+        el.addEventListener('change', updatePreview);
+      });
+
+      // Quick tags insert for custom mode
+      let lastFocusedInput: HTMLInputElement | null = null;
+      ['hfHL', 'hfHC', 'hfHR', 'hfFL', 'hfFC', 'hfFR'].forEach((id) => {
+        const inp = document.getElementById(id) as HTMLInputElement | null;
+        inp?.addEventListener('focus', () => { lastFocusedInput = inp; });
+      });
+
+      this.container.querySelectorAll('.hf-tag-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const tag = (btn as HTMLElement).dataset.insert || '';
+          const target = lastFocusedInput || (document.getElementById('hfFC') as HTMLInputElement);
+          if (target) {
+            target.value = (target.value ? target.value + ' ' : '') + tag;
+            updatePreview();
+            target.focus();
+          }
+        });
+      });
+
+      updatePreview();
+
+      const closeBtn = this.container.querySelector('.dialog-close-btn');
+      const cancelBtn = this.container.querySelector('[data-dialog-action="cancel"]');
+      const confirmBtn = this.container.querySelector('[data-dialog-action="confirm"]');
+
+      const cleanup = (result: boolean) => {
+        this.overlay.classList.add('hidden');
+        if (!result) {
+          resolve(null);
+        } else {
+          // Read result according to activeMode
+          if (activeMode === 'page') {
+            const formatSelect = document.getElementById('hfPageFormatSelect') as HTMLSelectElement;
+            const customInput = document.getElementById('hfPageCustomInput') as HTMLInputElement;
+            const template = formatSelect.value === 'custom' ? (customInput.value.trim() || '{page}') : formatSelect.value;
+            const pos = (document.getElementById('hfPagePositionSelect') as HTMLSelectElement).value;
+            const startPage = parseInt((document.getElementById('hfPageStartInput') as HTMLInputElement).value, 10) || 1;
+            const fontSize = parseInt((document.getElementById('hfPageFontSize') as HTMLSelectElement).value, 10) || 9;
+
+            let hl = '', hc = '', hr = '', fl = '', fc = '', fr = '';
+            if (pos === 'bottom-center') fc = template;
+            else if (pos === 'bottom-right') fr = template;
+            else if (pos === 'bottom-left') fl = template;
+            else if (pos === 'top-center') hc = template;
+            else if (pos === 'top-right') hr = template;
+            else if (pos === 'top-left') hl = template;
+
+            resolve({
+              headerLeft: hl,
+              headerCenter: hc,
+              headerRight: hr,
+              footerLeft: fl,
+              footerCenter: fc,
+              footerRight: fr,
+              startPage,
+              prefix: '',
+              isBates: false,
+              batesDigits: 6,
+              fontSize,
+            });
+          } else if (activeMode === 'bates') {
+            const formatSelect = document.getElementById('batesFormatSelect') as HTMLSelectElement;
+            const customInput = document.getElementById('batesCustomInput') as HTMLInputElement;
+            const template = formatSelect.value === 'custom' ? (customInput.value.trim() || '{prefix}{page}') : formatSelect.value;
+            const prefix = (document.getElementById('batesPrefixInput') as HTMLInputElement).value || '';
+            const digits = parseInt((document.getElementById('batesDigitsSelect') as HTMLSelectElement).value, 10) || 6;
+            const pos = (document.getElementById('batesPositionSelect') as HTMLSelectElement).value;
+            const startPage = parseInt((document.getElementById('batesStartInput') as HTMLInputElement).value, 10) || 1;
+            const fontSize = parseInt((document.getElementById('batesFontSize') as HTMLSelectElement).value, 10) || 10;
+
+            let hl = '', hc = '', hr = '', fl = '', fc = '', fr = '';
+            if (pos === 'bottom-right') fr = template;
+            else if (pos === 'bottom-center') fc = template;
+            else if (pos === 'bottom-left') fl = template;
+            else if (pos === 'top-right') hr = template;
+            else if (pos === 'top-center') hc = template;
+            else if (pos === 'top-left') hl = template;
+
+            resolve({
+              headerLeft: hl,
+              headerCenter: hc,
+              headerRight: hr,
+              footerLeft: fl,
+              footerCenter: fc,
+              footerRight: fr,
+              startPage,
+              prefix,
+              isBates: true,
+              batesDigits: digits,
+              fontSize,
+            });
+          } else {
+            // custom mode
+            const fontSize = parseInt((document.getElementById('hfCustomFontSize') as HTMLSelectElement).value, 10) || 9;
+            resolve({
+              headerLeft: (document.getElementById('hfHL') as HTMLInputElement).value,
+              headerCenter: (document.getElementById('hfHC') as HTMLInputElement).value,
+              headerRight: (document.getElementById('hfHR') as HTMLInputElement).value,
+              footerLeft: (document.getElementById('hfFL') as HTMLInputElement).value,
+              footerCenter: (document.getElementById('hfFC') as HTMLInputElement).value,
+              footerRight: (document.getElementById('hfFR') as HTMLInputElement).value,
+              startPage: parseInt((document.getElementById('hfStart') as HTMLInputElement).value, 10) || 1,
+              prefix: 'DOC-',
+              isBates: false,
+              batesDigits: 6,
+              fontSize,
+            });
+          }
+        }
+
+        setTimeout(() => {
+          if (this.overlay.classList.contains('hidden')) {
+            this.container.innerHTML = '';
+          }
+        }, 150);
+      };
+
+      closeBtn?.addEventListener('click', () => cleanup(false));
+      cancelBtn?.addEventListener('click', () => cleanup(false));
+      confirmBtn?.addEventListener('click', () => cleanup(true));
+    });
   }
 
   /**
@@ -2542,6 +2982,246 @@ export class UIDialogs {
     if (!confirmed) return null;
     const title = (document.getElementById('bookmarkTitleInput') as HTMLInputElement)?.value.trim();
     return title || `Page ${currentPage}`;
+  }
+
+  /**
+   * Prompt user to manage (view, edit, reorder, delete, add) document bookmarks
+   */
+  static async promptManageBookmarks(
+    initialBookmarks: Array<{ id?: string; title: string; pageIndex: number }>,
+    currentPage: number,
+    totalPages: number,
+    onNavigate?: (page: number) => void
+  ): Promise<Array<{ id: string; title: string; pageIndex: number }> | null> {
+    const list: Array<{ id: string; title: string; pageIndex: number }> = initialBookmarks.map((b, i) => ({
+      id: b.id || `bm_${Date.now()}_${i}`,
+      title: b.title || `Bookmark ${i + 1}`,
+      pageIndex: typeof b.pageIndex === 'number' ? b.pageIndex : 0,
+    }));
+
+    const escapeHtml = (str: string) =>
+      str.replace(/[&<>'"]/g, (tag) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;',
+      }[tag] || tag));
+
+    const modalHtml = `
+      <div class="dialog-modal" style="max-width: 580px; width: 95%;">
+        <div class="dialog-header">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="material-symbols-rounded" style="color:var(--primary); font-size:22px;">bookmarks</span>
+            <div>
+              <h3 style="margin:0; font-size:14px; font-weight:600;">Manage Bookmarks</h3>
+              <p style="margin:2px 0 0; font-size:11px; color:var(--text-muted); font-weight:normal;">
+                Edit, reorder, jump, or add document outline bookmarks
+              </p>
+            </div>
+          </div>
+          <button class="dialog-close-btn" title="Close"><span class="material-symbols-rounded">close</span></button>
+        </div>
+        <div class="dialog-body" style="padding: 14px; max-height: 380px; overflow-y: auto;">
+          <div id="bmManagerBody"></div>
+        </div>
+        <div class="dialog-footer" style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="dialog-btn" id="btnBmAddMore" style="display:flex; align-items:center; gap:4px; font-size:12px;">
+              <span class="material-symbols-rounded" style="font-size:16px;">add</span> Add
+            </button>
+            <button type="button" class="dialog-btn" id="btnBmClearAll" style="display:flex; align-items:center; gap:4px; font-size:12px; color:var(--danger, #ef4444);">
+              <span class="material-symbols-rounded" style="font-size:16px;">delete_sweep</span> Clear All
+            </button>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
+            <button class="dialog-btn primary" data-dialog-action="confirm" style="display:flex; align-items:center; gap:4px;">
+              <span class="material-symbols-rounded" style="font-size:16px;">check</span> Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    return new Promise((resolve) => {
+      this.container.innerHTML = modalHtml;
+      this.overlay.classList.remove('hidden');
+
+      const renderContent = () => {
+        const containerBody = document.getElementById('bmManagerBody');
+        if (!containerBody) return;
+
+        if (list.length === 0) {
+          containerBody.innerHTML = `
+            <div style="text-align: center; padding: 28px 16px; border: 2px dashed var(--border-subtle, #e2e8f0); border-radius: 8px;">
+              <span class="material-symbols-rounded" style="font-size: 40px; color: var(--text-light, #94a3b8); margin-bottom: 8px; display: block;">bookmarks</span>
+              <h4 style="margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--text-main);">No Bookmarks in Document</h4>
+              <p style="margin: 0 0 16px; font-size: 12px; color: var(--text-muted); max-width: 380px; margin-inline: auto; line-height: 1.4;">
+                Bookmarks provide a table of contents outline allowing users to quickly jump between sections of the PDF.
+              </p>
+              <button type="button" id="btnEmptyAddCurrent" class="dialog-btn primary" style="display: inline-flex; align-items: center; gap: 6px; margin: 0 auto;">
+                <span class="material-symbols-rounded" style="font-size: 16px;">bookmark_add</span>
+                Add Bookmark for Current Page (Page ${currentPage})
+              </button>
+            </div>
+          `;
+          document.getElementById('btnEmptyAddCurrent')?.addEventListener('click', () => {
+            list.push({
+              id: `bm_${Date.now()}`,
+              title: `Page ${currentPage}`,
+              pageIndex: currentPage - 1,
+            });
+            renderContent();
+          });
+          return;
+        }
+
+        let rowsHtml = '';
+        list.forEach((bm, idx) => {
+          rowsHtml += `
+            <div class="bm-manager-row" data-index="${idx}" style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-surface-elevated, #f8fafc); border: 1px solid var(--border-subtle, #e2e8f0); border-radius: 6px; margin-bottom: 6px; transition: background 0.15s ease;">
+              <span style="font-size: 11px; color: var(--text-muted); width: 22px; text-align: center; font-weight: 600;">#${idx + 1}</span>
+              <div style="flex: 1; display: flex; align-items: center; gap: 6px;">
+                <input type="text" class="bm-row-title" value="${escapeHtml(bm.title)}" placeholder="Bookmark title..." style="width: 100%; padding: 6px 10px; font-size: 12.5px; border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px; box-sizing: border-box; background: var(--bg-surface, #fff); color: var(--text-main);" />
+              </div>
+              <div style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); white-space: nowrap;">
+                <span>Page</span>
+                <input type="number" class="bm-row-page" value="${bm.pageIndex + 1}" min="1" max="${totalPages}" style="width: 54px; padding: 5px 6px; font-size: 12px; text-align: center; border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px; background: var(--bg-surface, #fff); color: var(--text-main);" />
+              </div>
+              <div style="display: flex; align-items: center; gap: 2px;">
+                <button type="button" class="btn-bm-nav" title="Jump to page" style="border:none; background:transparent; padding:4px; cursor:pointer; border-radius:4px; color:var(--primary); display:flex; align-items:center;">
+                  <span class="material-symbols-rounded" style="font-size:18px;">visibility</span>
+                </button>
+                <button type="button" class="btn-bm-up" title="Move Up" style="border:none; background:transparent; padding:4px; cursor:pointer; border-radius:4px; color:var(--text-muted); display:flex; align-items:center; ${idx === 0 ? 'opacity:0.3; pointer-events:none;' : ''}">
+                  <span class="material-symbols-rounded" style="font-size:18px;">arrow_upward</span>
+                </button>
+                <button type="button" class="btn-bm-down" title="Move Down" style="border:none; background:transparent; padding:4px; cursor:pointer; border-radius:4px; color:var(--text-muted); display:flex; align-items:center; ${idx === list.length - 1 ? 'opacity:0.3; pointer-events:none;' : ''}">
+                  <span class="material-symbols-rounded" style="font-size:18px;">arrow_downward</span>
+                </button>
+                <button type="button" class="btn-bm-del" title="Delete" style="border:none; background:transparent; padding:4px; cursor:pointer; border-radius:4px; color:var(--danger, #ef4444); display:flex; align-items:center;">
+                  <span class="material-symbols-rounded" style="font-size:18px;">delete</span>
+                </button>
+              </div>
+            </div>
+          `;
+        });
+
+        containerBody.innerHTML = rowsHtml;
+
+        const rowEls = containerBody.querySelectorAll('.bm-manager-row');
+        rowEls.forEach((rowEl) => {
+          const idx = parseInt(rowEl.getAttribute('data-index') || '0', 10);
+          const titleInput = rowEl.querySelector('.bm-row-title') as HTMLInputElement;
+          const pageInput = rowEl.querySelector('.bm-row-page') as HTMLInputElement;
+          const navBtn = rowEl.querySelector('.btn-bm-nav');
+          const upBtn = rowEl.querySelector('.btn-bm-up');
+          const downBtn = rowEl.querySelector('.btn-bm-down');
+          const delBtn = rowEl.querySelector('.btn-bm-del');
+
+          titleInput?.addEventListener('input', () => {
+            if (list[idx]) list[idx].title = titleInput.value;
+          });
+
+          pageInput?.addEventListener('change', () => {
+            const val = parseInt(pageInput.value, 10);
+            if (!isNaN(val) && val >= 1 && val <= totalPages) {
+              if (list[idx]) list[idx].pageIndex = val - 1;
+            } else if (list[idx]) {
+              pageInput.value = (list[idx].pageIndex + 1).toString();
+            }
+          });
+
+          navBtn?.addEventListener('click', () => {
+            if (list[idx]) onNavigate?.(list[idx].pageIndex + 1);
+          });
+
+          upBtn?.addEventListener('click', () => {
+            if (idx > 0) {
+              const temp = list[idx];
+              list[idx] = list[idx - 1];
+              list[idx - 1] = temp;
+              renderContent();
+            }
+          });
+
+          downBtn?.addEventListener('click', () => {
+            if (idx < list.length - 1) {
+              const temp = list[idx];
+              list[idx] = list[idx + 1];
+              list[idx + 1] = temp;
+              renderContent();
+            }
+          });
+
+          delBtn?.addEventListener('click', () => {
+            list.splice(idx, 1);
+            renderContent();
+          });
+        });
+      };
+
+      renderContent();
+
+      document.getElementById('btnBmAddMore')?.addEventListener('click', () => {
+        list.push({
+          id: `bm_${Date.now()}`,
+          title: `Page ${currentPage}`,
+          pageIndex: currentPage - 1,
+        });
+        renderContent();
+        const inputs = this.container.querySelectorAll('.bm-row-title');
+        if (inputs.length > 0) {
+          (inputs[inputs.length - 1] as HTMLInputElement).focus();
+          (inputs[inputs.length - 1] as HTMLInputElement).select();
+        }
+      });
+
+      document.getElementById('btnBmClearAll')?.addEventListener('click', () => {
+        if (list.length === 0) return;
+        if (confirm('Are you sure you want to remove all bookmarks?')) {
+          list.length = 0;
+          renderContent();
+        }
+      });
+
+      const closeBtn = this.container.querySelector('.dialog-close-btn');
+      const cancelBtn = this.container.querySelector('[data-dialog-action="cancel"]');
+      const confirmBtn = this.container.querySelector('[data-dialog-action="confirm"]');
+
+      const cleanup = (result: Array<{ id: string; title: string; pageIndex: number }> | null) => {
+        this.overlay.classList.add('hidden');
+        resolve(result);
+        setTimeout(() => {
+          if (this.overlay.classList.contains('hidden')) {
+            this.container.innerHTML = '';
+          }
+        }, 150);
+      };
+
+      closeBtn?.addEventListener('click', () => cleanup(null));
+      cancelBtn?.addEventListener('click', () => cleanup(null));
+      confirmBtn?.addEventListener('click', () => {
+        const rowEls = this.container.querySelectorAll('.bm-manager-row');
+        rowEls.forEach((rowEl) => {
+          const idx = parseInt(rowEl.getAttribute('data-index') || '0', 10);
+          const titleInput = rowEl.querySelector('.bm-row-title') as HTMLInputElement;
+          const pageInput = rowEl.querySelector('.bm-row-page') as HTMLInputElement;
+          if (list[idx]) {
+            if (titleInput && titleInput.value.trim()) {
+              list[idx].title = titleInput.value.trim();
+            }
+            if (pageInput) {
+              const val = parseInt(pageInput.value, 10);
+              if (!isNaN(val) && val >= 1 && val <= totalPages) {
+                list[idx].pageIndex = val - 1;
+              }
+            }
+          }
+        });
+        cleanup(list);
+      });
+    });
   }
 }
 

@@ -28,10 +28,10 @@
           <button class="qat-btn" data-action="save-as" title="Save As (Ctrl+Shift+S)">
             <span class="material-symbols-rounded">save_as</span>
           </button>
-          <button class="qat-btn" data-action="undo" title="Undo (Ctrl+Z)">
+          <button class="qat-btn" id="qatUndoBtn" data-action="undo" title="Undo (Ctrl+Z)" disabled>
             <span class="material-symbols-rounded">undo</span>
           </button>
-          <button class="qat-btn" data-action="redo" title="Redo (Ctrl+Y)">
+          <button class="qat-btn" id="qatRedoBtn" data-action="redo" title="Redo (Ctrl+Y)" disabled>
             <span class="material-symbols-rounded">redo</span>
           </button>
         </div>
@@ -113,28 +113,7 @@
               </button>
             </div>
           </div>
-          <div class="ribbon-separator"></div>
-          <div class="ribbon-group">
-            <div class="ribbon-group-label">Page Tools</div>
-            <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="rotate-cw" title="Rotate Current Page 90° Clockwise">
-                <span class="material-symbols-rounded">rotate_right</span>
-                <span class="ribbon-btn-label">Rotate CW</span>
-              </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="insert-blank" title="Add Blank Page After Current Page">
-                <span class="material-symbols-rounded">note_add</span>
-                <span class="ribbon-btn-label">Add Blank</span>
-              </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="insert-file" title="Insert Pages from Another File...">
-                <span class="material-symbols-rounded">post_add</span>
-                <span class="ribbon-btn-label">Insert File</span>
-              </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="delete-page-current" title="Delete Current Page">
-                <span class="material-symbols-rounded">delete</span>
-                <span class="ribbon-btn-label">Delete Page</span>
-              </button>
-            </div>
-          </div>
+
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
             <div class="ribbon-group-label">Quick Tools</div>
@@ -186,16 +165,10 @@
                 <span class="material-symbols-rounded">text_fields</span>
                 <span class="ribbon-btn-label">Add Text</span>
               </button>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="add-heading" title="Add large heading title">
-                  <span class="material-symbols-rounded">title</span>
-                  <span>Heading</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="find-replace" title="Find text in document">
-                  <span class="material-symbols-rounded">search</span>
-                  <span>Find Text</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="find-replace" title="Find text in document (Ctrl+F)">
+                <span class="material-symbols-rounded">search</span>
+                <span class="ribbon-btn-label">Find Text</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
@@ -226,12 +199,10 @@
                 <span class="material-symbols-rounded">bookmark_add</span>
                 <span class="ribbon-btn-label">Add Bookmark</span>
               </button>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="manage-bookmarks" title="Open Bookmarks outline">
-                  <span class="material-symbols-rounded">bookmarks</span>
-                  <span>Manage</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="manage-bookmarks" title="Manage bookmarks outline">
+                <span class="material-symbols-rounded">bookmarks</span>
+                <span class="ribbon-btn-label">Manage</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
@@ -241,10 +212,6 @@
               <button class="ribbon-btn ribbon-btn-lg" data-action="header-footer" title="Add headers and footers">
                 <span class="material-symbols-rounded">vertical_split</span>
                 <span class="ribbon-btn-label">Header/Footer</span>
-              </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="page-numbers" title="Add page numbers to document">
-                <span class="material-symbols-rounded">format_list_numbered</span>
-                <span class="ribbon-btn-label">Page Numbers</span>
               </button>
             </div>
           </div>
@@ -256,68 +223,70 @@
             <div class="ribbon-group-label">Insert & Add</div>
             <div class="ribbon-group-content">
               <button class="ribbon-btn ribbon-btn-lg" data-action="insert-blank" title="Add Blank Page After Current Page">
-                <span class="material-symbols-rounded">note_add</span>
+                <span class="material-symbols-rounded">library_add</span>
                 <span class="ribbon-btn-label">Add Blank</span>
               </button>
               <button class="ribbon-btn ribbon-btn-lg" data-action="insert-file" title="Insert Pages from Another PDF File...">
                 <span class="material-symbols-rounded">post_add</span>
                 <span class="ribbon-btn-label">Insert File</span>
               </button>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="duplicate-page" title="Duplicate Current Page">
-                  <span class="material-symbols-rounded">content_copy</span>
-                  <span>Duplicate</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="extract-pages" title="Extract Pages to New PDF">
-                  <span class="material-symbols-rounded">exit_to_app</span>
-                  <span>Extract</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="duplicate-page" title="Duplicate Current Page">
+                <span class="material-symbols-rounded">content_copy</span>
+                <span class="ribbon-btn-label">Duplicate</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="extract-pages" title="Extract Pages to New PDF">
+                <span class="material-symbols-rounded">exit_to_app</span>
+                <span class="ribbon-btn-label">Extract</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
-            <div class="ribbon-group-label">Rotate & Delete</div>
+            <div class="ribbon-group-label">Rotate</div>
             <div class="ribbon-group-content">
               <button class="ribbon-btn ribbon-btn-lg" data-action="rotate-cw" title="Rotate Current Page 90° Clockwise">
                 <span class="material-symbols-rounded">rotate_right</span>
                 <span class="ribbon-btn-label">Rotate CW</span>
               </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="rotate-ccw" title="Rotate Current Page 90° Counter-Clockwise">
+                <span class="material-symbols-rounded">rotate_left</span>
+                <span class="ribbon-btn-label">Rotate CCW</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="rotate-dialog" title="Rotate Page Range Options...">
+                <span class="material-symbols-rounded">tune</span>
+                <span class="ribbon-btn-label">Rotate Range</span>
+              </button>
+            </div>
+          </div>
+          <div class="ribbon-separator"></div>
+          <div class="ribbon-group">
+            <div class="ribbon-group-label">Delete</div>
+            <div class="ribbon-group-content">
               <button class="ribbon-btn ribbon-btn-lg" data-action="delete-page-current" title="Delete Current Page">
                 <span class="material-symbols-rounded">delete</span>
                 <span class="ribbon-btn-label">Delete Page</span>
               </button>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="rotate-ccw" title="Rotate Current Page 90° CCW">
-                  <span class="material-symbols-rounded">rotate_left</span>
-                  <span>Rotate CCW</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="rotate-dialog" title="Rotate Page Range Options...">
-                  <span class="material-symbols-rounded">tune</span>
-                  <span>Rotate Range</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="delete-pages" title="Delete Page Range...">
-                  <span class="material-symbols-rounded">playlist_remove</span>
-                  <span>Delete Range</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="delete-pages" title="Delete Page Range...">
+                <span class="material-symbols-rounded">playlist_remove</span>
+                <span class="ribbon-btn-label">Delete Range</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
             <div class="ribbon-group-label">Organize</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="reorder-pages">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="reorder-pages" title="Reorder and rearrange pages">
                 <span class="material-symbols-rounded">swap_vert</span>
                 <span class="ribbon-btn-label">Reorder</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="crop" title="Crop margins of pages">
+                <span class="material-symbols-rounded">crop</span>
+                <span class="ribbon-btn-label">Crop Page</span>
               </button>
               <button class="ribbon-btn ribbon-btn-lg" data-action="split" title="Split Document into Multiple PDFs">
                 <span class="material-symbols-rounded">call_split</span>
                 <span class="ribbon-btn-label">Split PDF</span>
-              </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="crop">
-                <span class="material-symbols-rounded">crop</span>
-                <span class="ribbon-btn-label">Crop Page</span>
               </button>
             </div>
           </div>
@@ -325,27 +294,13 @@
           <div class="ribbon-group">
             <div class="ribbon-group-label">Numbering</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="page-numbering">
-                <span class="material-symbols-rounded">tag</span>
-                <span class="ribbon-btn-label">Page Number</span>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="page-numbers" title="Add Page Numbers">
+                <span class="material-symbols-rounded">format_list_numbered</span>
+                <span class="ribbon-btn-label">Page Numbers</span>
               </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="bates-numbering">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="bates-numbering" title="Add Bates Numbering">
                 <span class="material-symbols-rounded">pin</span>
                 <span class="ribbon-btn-label">Bates Number</span>
-              </button>
-            </div>
-          </div>
-          <div class="ribbon-separator"></div>
-          <div class="ribbon-group">
-            <div class="ribbon-group-label">Split</div>
-            <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="split-doc">
-                <span class="material-symbols-rounded">call_split</span>
-                <span class="ribbon-btn-label">Split Doc</span>
-              </button>
-              <button class="ribbon-btn ribbon-btn-lg" data-action="replace-pages">
-                <span class="material-symbols-rounded">find_replace</span>
-                <span class="ribbon-btn-label">Replace</span>
               </button>
             </div>
           </div>
@@ -356,33 +311,31 @@
           <div class="ribbon-group">
             <div class="ribbon-group-label">Text Markup</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="highlight" data-action="tool-highlight">
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="highlight" data-action="tool-highlight" title="Highlight text">
                 <span class="material-symbols-rounded" style="color:#FBBF24">border_color</span>
                 <span class="ribbon-btn-label">Highlight</span>
               </button>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="underline" data-action="tool-underline">
-                  <span class="material-symbols-rounded">format_underlined</span>
-                  <span>Underline</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="strikethrough" data-action="tool-strikethrough">
-                  <span class="material-symbols-rounded">strikethrough_s</span>
-                  <span>Strikeout</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="underline" data-action="tool-underline" title="Underline text">
+                <span class="material-symbols-rounded">format_underlined</span>
+                <span class="ribbon-btn-label">Underline</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="strikethrough" data-action="tool-strikethrough" title="Strikeout text">
+                <span class="material-symbols-rounded">strikethrough_s</span>
+                <span class="ribbon-btn-label">Strikeout</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
             <div class="ribbon-group-label">Notes</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="sticky-note" data-action="tool-sticky-note">
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="sticky-note" data-action="tool-sticky-note" title="Add Sticky Note">
                 <span class="material-symbols-rounded" style="color:#FBBF24">sticky_note_2</span>
                 <span class="ribbon-btn-label">Sticky Note</span>
               </button>
-              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="text-comment" data-action="tool-text-comment">
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="text-comment" data-action="tool-text-comment" title="Add Text Comment">
                 <span class="material-symbols-rounded">comment</span>
-                <span class="ribbon-btn-label">Text Comment</span>
+                <span class="ribbon-btn-label">Comment</span>
               </button>
             </div>
           </div>
@@ -390,41 +343,37 @@
           <div class="ribbon-group">
             <div class="ribbon-group-label">Draw & Shapes</div>
             <div class="ribbon-group-content">
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="line" data-action="tool-line">
-                  <span class="material-symbols-rounded">horizontal_rule</span>
-                  <span>Line</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="arrow" data-action="tool-arrow">
-                  <span class="material-symbols-rounded">arrow_forward</span>
-                  <span>Arrow</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="rectangle" data-action="tool-rectangle">
-                  <span class="material-symbols-rounded">rectangle</span>
-                  <span>Rectangle</span>
-                </button>
-              </div>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="ellipse" data-action="tool-ellipse">
-                  <span class="material-symbols-rounded">circle</span>
-                  <span>Oval</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="freehand" data-action="tool-freehand">
-                  <span class="material-symbols-rounded">draw</span>
-                  <span>Freehand</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm annotation-tool" data-tool="eraser" data-action="tool-eraser">
-                  <span class="material-symbols-rounded">ink_eraser</span>
-                  <span>Eraser</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="freehand" data-action="tool-freehand" title="Freehand Drawing / Ink">
+                <span class="material-symbols-rounded">draw</span>
+                <span class="ribbon-btn-label">Draw</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="line" data-action="tool-line" title="Draw Line">
+                <span class="material-symbols-rounded">horizontal_rule</span>
+                <span class="ribbon-btn-label">Line</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="arrow" data-action="tool-arrow" title="Draw Arrow">
+                <span class="material-symbols-rounded">arrow_forward</span>
+                <span class="ribbon-btn-label">Arrow</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="rectangle" data-action="tool-rectangle" title="Draw Rectangle">
+                <span class="material-symbols-rounded">rectangle</span>
+                <span class="ribbon-btn-label">Rectangle</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="ellipse" data-action="tool-ellipse" title="Draw Oval">
+                <span class="material-symbols-rounded">circle</span>
+                <span class="ribbon-btn-label">Oval</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg annotation-tool" data-tool="eraser" data-action="tool-eraser" title="Erase Annotations">
+                <span class="material-symbols-rounded">ink_eraser</span>
+                <span class="ribbon-btn-label">Eraser</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
             <div class="ribbon-group-label">Stamp</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="stamp">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="stamp" title="Add Stamp">
                 <span class="material-symbols-rounded">approval</span>
                 <span class="ribbon-btn-label">Stamp</span>
               </button>
@@ -434,20 +383,14 @@
           <div class="ribbon-group">
             <div class="ribbon-group-label">Tools</div>
             <div class="ribbon-group-content">
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="compare-pdf">
-                  <span class="material-symbols-rounded">compare</span>
-                  <span>Compare</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="measure">
-                  <span class="material-symbols-rounded">straighten</span>
-                  <span>Measure</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="delete-annotations">
-                  <span class="material-symbols-rounded">delete_forever</span>
-                  <span>Clear All</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="measure" title="Measure Distance">
+                <span class="material-symbols-rounded">straighten</span>
+                <span class="ribbon-btn-label">Measure</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="delete-annotations" title="Clear all annotations">
+                <span class="material-symbols-rounded">delete_forever</span>
+                <span class="ribbon-btn-label">Clear All</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
@@ -474,66 +417,58 @@
           <div class="ribbon-group">
             <div class="ribbon-group-label">Form Actions</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="fill-form">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="fill-form" title="Fill out interactive form fields">
                 <span class="material-symbols-rounded">edit_note</span>
                 <span class="ribbon-btn-label">Fill Form</span>
               </button>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="reset-form">
-                  <span class="material-symbols-rounded">restart_alt</span>
-                  <span>Reset Form</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="flatten-form">
-                  <span class="material-symbols-rounded">layers_clear</span>
-                  <span>Flatten Form</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="reset-form" title="Reset all form fields to default">
+                <span class="material-symbols-rounded">restart_alt</span>
+                <span class="ribbon-btn-label">Reset Form</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="flatten-form" title="Flatten form fields into page content">
+                <span class="material-symbols-rounded">layers_clear</span>
+                <span class="ribbon-btn-label">Flatten Form</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
             <div class="ribbon-group-label">Create Fields</div>
             <div class="ribbon-group-content">
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="add-text-field">
-                  <span class="material-symbols-rounded">text_fields</span>
-                  <span>Text Field</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="add-checkbox">
-                  <span class="material-symbols-rounded">check_box</span>
-                  <span>Checkbox</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="add-radio">
-                  <span class="material-symbols-rounded">radio_button_checked</span>
-                  <span>Radio</span>
-                </button>
-              </div>
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="add-dropdown">
-                  <span class="material-symbols-rounded">arrow_drop_down_circle</span>
-                  <span>Dropdown</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="add-signature-field">
-                  <span class="material-symbols-rounded">draw</span>
-                  <span>Signature Field</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-text-field" title="Add Text Field">
+                <span class="material-symbols-rounded">text_fields</span>
+                <span class="ribbon-btn-label">Text Field</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-checkbox" title="Add Checkbox">
+                <span class="material-symbols-rounded">check_box</span>
+                <span class="ribbon-btn-label">Checkbox</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-radio" title="Add Radio Button">
+                <span class="material-symbols-rounded">radio_button_checked</span>
+                <span class="ribbon-btn-label">Radio</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-dropdown" title="Add Dropdown List">
+                <span class="material-symbols-rounded">arrow_drop_down_circle</span>
+                <span class="ribbon-btn-label">Dropdown</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="add-signature-field" title="Add Signature Field">
+                <span class="material-symbols-rounded">draw</span>
+                <span class="ribbon-btn-label">Signature</span>
+              </button>
             </div>
           </div>
           <div class="ribbon-separator"></div>
           <div class="ribbon-group">
             <div class="ribbon-group-label">Data</div>
             <div class="ribbon-group-content">
-              <div class="ribbon-btn-stack">
-                <button class="ribbon-btn ribbon-btn-sm" data-action="import-form-data">
-                  <span class="material-symbols-rounded">upload_file</span>
-                  <span>Import Data</span>
-                </button>
-                <button class="ribbon-btn ribbon-btn-sm" data-action="export-form-data">
-                  <span class="material-symbols-rounded">download</span>
-                  <span>Export Data</span>
-                </button>
-              </div>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="import-form-data" title="Import Form Data from JSON">
+                <span class="material-symbols-rounded">upload_file</span>
+                <span class="ribbon-btn-label">Import Data</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="export-form-data" title="Export Form Data to JSON">
+                <span class="material-symbols-rounded">download</span>
+                <span class="ribbon-btn-label">Export Data</span>
+              </button>
             </div>
           </div>
         </div>
@@ -632,9 +567,25 @@
         <select id="tebSize" class="teb-select" disabled title="Font size">
           <option value="">—</option>
         </select>
+        <div class="teb-btn-group">
+          <button id="tebBoldBtn" class="teb-btn teb-btn-icon" disabled title="Bold (Ctrl+B)">
+            <span class="material-symbols-rounded" style="font-size:16px;">format_bold</span>
+          </button>
+          <button id="tebItalicBtn" class="teb-btn teb-btn-icon" disabled title="Italic (Ctrl+I)">
+            <span class="material-symbols-rounded" style="font-size:16px;">format_italic</span>
+          </button>
+        </div>
         <label class="teb-label">Color</label>
         <input type="color" id="tebColor" class="teb-color" value="#000000" disabled title="Text color" />
-        <button id="tebDeleteBlock" class="teb-btn teb-btn-danger" disabled title="Delete selected text block">
+        <label class="teb-label">Mask</label>
+        <input type="color" id="tebBgColor" class="teb-color" value="#ffffff" disabled title="Background erase mask color" />
+        <button id="tebCenterBtn" class="teb-btn teb-btn-icon" disabled title="Center Horizontally on Page">
+          <span class="material-symbols-rounded" style="font-size:16px;">format_align_center</span>
+        </button>
+        <button id="tebDuplicateBlock" class="teb-btn teb-btn-icon" disabled title="Duplicate selected text block">
+          <span class="material-symbols-rounded" style="font-size:16px;">content_copy</span>
+        </button>
+        <button id="tebDeleteBlock" class="teb-btn teb-btn-danger" disabled title="Delete selected text block (Del)">
           <span class="material-symbols-rounded" style="font-size:15px;">delete</span>
         </button>
       </div>
@@ -695,9 +646,14 @@
           <div class="sidebar-panel" data-sidepanel="bookmarks">
             <div class="sidebar-panel-header">
               <h3>Bookmarks</h3>
-              <button class="sidebar-action-btn" data-action="add-bookmark" title="Add Bookmark">
-                <span class="material-symbols-rounded">add</span>
-              </button>
+              <div style="display:flex; align-items:center; gap:4px;">
+                <button class="sidebar-action-btn" data-action="manage-bookmarks" title="Manage Bookmarks">
+                  <span class="material-symbols-rounded" style="font-size:18px;">tune</span>
+                </button>
+                <button class="sidebar-action-btn" data-action="add-bookmark" title="Add Bookmark">
+                  <span class="material-symbols-rounded" style="font-size:18px;">add</span>
+                </button>
+              </div>
             </div>
             <div class="bookmark-list" id="bookmarkList">
               <!-- Bookmarks generated dynamically -->
@@ -713,22 +669,37 @@
           </div>
           <div class="sidebar-panel" data-sidepanel="search">
             <div class="sidebar-panel-header">
-              <h3>Search</h3>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="material-symbols-rounded" style="font-size:18px; color:var(--primary-color, #2563eb);">search</span>
+                <h3 style="margin:0; font-size:13px; font-weight:600;">Find in Document</h3>
+              </div>
+              <button class="sidebar-action-btn" id="btnSearchClose" title="Close Search (Esc)">
+                <span class="material-symbols-rounded" style="font-size:18px;">close</span>
+              </button>
             </div>
             <div class="search-panel" id="searchPanel">
               <div class="search-input-wrap">
-                <span class="material-symbols-rounded">search</span>
-                <input type="text" id="searchInput" placeholder="Search text in document..." />
-                <button class="search-btn" id="searchPrev" title="Previous Match">
-                  <span class="material-symbols-rounded">keyboard_arrow_up</span>
+                <span class="material-symbols-rounded search-input-icon">search</span>
+                <input type="text" id="searchInput" placeholder="Search text in document..." autocomplete="off" />
+                <button class="search-clear-btn" id="searchClearBtn" title="Clear Search" style="display:none;">
+                  <span class="material-symbols-rounded">close</span>
                 </button>
-                <button class="search-btn" id="searchNext" title="Next Match">
-                  <span class="material-symbols-rounded">keyboard_arrow_down</span>
-                </button>
+                <div class="search-nav-group">
+                  <button class="search-btn" id="searchPrev" title="Previous Match (Shift+Enter)">
+                    <span class="material-symbols-rounded">keyboard_arrow_up</span>
+                  </button>
+                  <button class="search-btn" id="searchNext" title="Next Match (Enter)">
+                    <span class="material-symbols-rounded">keyboard_arrow_down</span>
+                  </button>
+                </div>
+              </div>
+              <div class="search-status-bar" id="searchStatusBar" style="display:none;">
+                <span id="searchMatchCount" class="search-match-count">0 matches</span>
+                <span class="search-nav-hint">Enter ↵ / Shift+Enter</span>
               </div>
               <div class="search-options">
-                <label><input type="checkbox" id="searchCaseSensitive" /> Match case</label>
-                <label><input type="checkbox" id="searchWholeWord" /> Whole word</label>
+                <label class="search-option-label"><input type="checkbox" id="searchCaseSensitive" /> Match case</label>
+                <label class="search-option-label"><input type="checkbox" id="searchWholeWord" /> Whole word</label>
               </div>
               <div class="search-results" id="searchResults">
                 <!-- Search results -->

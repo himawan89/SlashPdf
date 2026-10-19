@@ -1,5 +1,5 @@
 import './style.css';
-import type { PDFDocumentItem, ViewLayoutMode, AnnotationType } from './types';
+import type { PDFDocumentItem, ViewLayoutMode, AnnotationType, SearchResult, DocumentHistorySnapshot } from './types';
 import { PDFEditorService } from './pdfEditor';
 import { PDFViewerManager } from './pdfViewerManager';
 import { AnnotationManager } from './annotationManager';
@@ -155,6 +155,8 @@ class SlashPDFApp {
 
     // Search panel inputs
     const searchInput = document.getElementById('searchInput') as HTMLInputElement;
+    const searchClearBtn = document.getElementById('searchClearBtn') as HTMLButtonElement | null;
+    const searchCloseBtn = document.getElementById('btnSearchClose') as HTMLButtonElement | null;
     const searchNext = document.getElementById('searchNext');
     const searchPrev = document.getElementById('searchPrev');
     const searchCase = document.getElementById('searchCaseSensitive') as HTMLInputElement;
@@ -163,40 +165,102 @@ class SlashPDFApp {
     const doSearch = async () => {
       const doc = this.getActiveDocument();
       if (!doc) return;
-      const q = searchInput.value;
-      if (!q.trim()) {
-        document.getElementById('searchResults')!.innerHTML = '';
+      const q = searchInput.value.trim();
+
+      if (!q) {
+        this.currentSearchResults = [];
+        this.currentSearchIndex = -1;
+        this.renderSearchResults();
+        this.clearSearchHighlights();
+        this.setStatus('Search cleared.');
         return;
       }
-      this.setStatus('Searching text...');
+
+      this.setStatus(`Searching for "${q}"...`);
       const results = await PDFViewerManager.searchDocument(doc.pdfDocProxy, q, searchCase.checked, searchWord.checked);
       this.currentSearchResults = results;
-      this.currentSearchIndex = 0;
+      this.currentSearchIndex = results.length > 0 ? 0 : -1;
       this.renderSearchResults();
+      this.renderSearchHighlights();
+
       if (results.length > 0) {
-        this.goToPage(results[0].pageIndex + 1);
-        this.setStatus(`Found ${results.length} match(es).`);
+        this.activateSearchMatch(0);
+        this.setStatus(`Found ${results.length} match(es) for "${q}".`);
       } else {
-        this.setStatus('No matches found.');
+        this.setStatus(`No matches found for "${q}".`);
       }
     };
 
+    let searchDebounceTimer: any = null;
+    searchInput?.addEventListener('input', () => {
+      const val = searchInput.value;
+      if (searchClearBtn) {
+        searchClearBtn.style.display = val.length > 0 ? 'flex' : 'none';
+      }
+      if (!val.trim()) {
+        clearTimeout(searchDebounceTimer);
+        this.currentSearchResults = [];
+        this.currentSearchIndex = -1;
+        this.renderSearchResults();
+        this.clearSearchHighlights();
+        this.setStatus('Search cleared.');
+        return;
+      }
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        doSearch();
+      }, 300);
+    });
+
     searchInput?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') doSearch();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(searchDebounceTimer);
+        if (this.currentSearchResults.length > 0) {
+          if (e.shiftKey) {
+            this.activateSearchMatch(this.currentSearchIndex - 1);
+          } else {
+            this.activateSearchMatch(this.currentSearchIndex + 1);
+          }
+        } else {
+          doSearch();
+        }
+      } else if (e.key === 'Escape') {
+        this.closeSearchPanel();
+      }
+    });
+
+    searchClearBtn?.addEventListener('click', () => {
+      searchInput.value = '';
+      searchClearBtn.style.display = 'none';
+      this.currentSearchResults = [];
+      this.currentSearchIndex = -1;
+      this.renderSearchResults();
+      this.clearSearchHighlights();
+      this.setStatus('Search cleared.');
+      searchInput.focus();
+    });
+
+    searchCloseBtn?.addEventListener('click', () => {
+      this.closeSearchPanel();
     });
 
     searchNext?.addEventListener('click', () => {
       if (this.currentSearchResults.length === 0) return;
-      this.currentSearchIndex = (this.currentSearchIndex + 1) % this.currentSearchResults.length;
-      const res = this.currentSearchResults[this.currentSearchIndex];
-      this.goToPage(res.pageIndex + 1);
+      this.activateSearchMatch(this.currentSearchIndex + 1);
     });
 
     searchPrev?.addEventListener('click', () => {
       if (this.currentSearchResults.length === 0) return;
-      this.currentSearchIndex = (this.currentSearchIndex - 1 + this.currentSearchResults.length) % this.currentSearchResults.length;
-      const res = this.currentSearchResults[this.currentSearchIndex];
-      this.goToPage(res.pageIndex + 1);
+      this.activateSearchMatch(this.currentSearchIndex - 1);
+    });
+
+    searchCase?.addEventListener('change', () => {
+      if (searchInput.value.trim()) doSearch();
+    });
+
+    searchWord?.addEventListener('change', () => {
+      if (searchInput.value.trim()) doSearch();
     });
   }
 
@@ -284,6 +348,11 @@ class SlashPDFApp {
     let scrollTop = 0;
 
     this.pdfPagesContainer.addEventListener('mousedown', (e) => {
+      // Do not pan if clicking on an interactive element (hyperlink, image placement box/overlay, text block)
+      if ((e.target as HTMLElement).closest('.pdf-interactive-link, .annotation-link-layer, .image-placement-box, .image-placement-overlay, .text-block')) {
+        return;
+      }
+
       const isMiddleClick = e.button === 1;
       const isLeftClick = e.button === 0;
       const canPan = (this.isHandTool && !this.annotationManager.getActiveTool() && isLeftClick) || isMiddleClick;
@@ -475,11 +544,27 @@ class SlashPDFApp {
 
   private initShortcuts() {
     window.addEventListener('keydown', (e) => {
-      // Skip shortcuts when typing in text inputs
+      // Skip shortcuts when typing in text inputs or contenteditable elements
       const activeEl = document.activeElement;
-      const isTextInput = activeEl instanceof HTMLInputElement || activeEl instanceof HTMLTextAreaElement;
+      const isTextInput =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        (activeEl as HTMLElement)?.isContentEditable;
 
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        if (!isTextInput) {
+          e.preventDefault();
+          this.undo();
+        }
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')
+      ) {
+        if (!isTextInput) {
+          e.preventDefault();
+          this.redo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
         this.saveDocument(true);
       } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -604,6 +689,17 @@ class SlashPDFApp {
       annotations: [],
       bookmarks,
       comments: [],
+      history: [
+        {
+          fileBytes: persistentBytes.slice(0),
+          annotations: [],
+          bookmarks: JSON.parse(JSON.stringify(bookmarks || [])),
+          comments: [],
+          currentPage: 1,
+          description: 'Initial state',
+        },
+      ],
+      historyIndex: 0,
     };
 
     this.documents.push(docItem);
@@ -658,6 +754,7 @@ class SlashPDFApp {
       this.pageInput.value = String(active.currentPage);
       this.pageInput.max = String(active.numPages);
     }
+    this.updateUndoRedoUI();
   }
 
   private switchDocument(index: number) {
@@ -752,6 +849,15 @@ class SlashPDFApp {
       // Render selectable text elements
       await PDFViewerManager.renderTextLayer(page, viewport, textLayerDiv);
 
+      // Render interactive link annotations & internal document jumps
+      await PDFViewerManager.renderAnnotationLinks(
+        page,
+        viewport,
+        pageWrapper,
+        doc.pdfDocProxy,
+        (targetPageNum) => this.goToPage(targetPageNum)
+      );
+
       annotCanvas.width = width;
       annotCanvas.height = height;
       annotCanvas.style.width = `${width}px`;
@@ -769,6 +875,10 @@ class SlashPDFApp {
       await this.refreshTextEditOverlays();
     }
 
+    if (this.currentSearchResults.length > 0) {
+      this.renderSearchHighlights();
+    }
+
     this.updateCursorMode();
     this.setStatus('Ready');
   }
@@ -776,6 +886,7 @@ class SlashPDFApp {
   private goToPage(pageNum: number) {
     const doc = this.getActiveDocument();
     if (!doc) return;
+    if (pageNum < 1 || pageNum > doc.numPages) return;
     doc.currentPage = pageNum;
     this.pageInput.value = String(pageNum);
 
@@ -783,7 +894,13 @@ class SlashPDFApp {
       this.renderActiveDocument();
     } else {
       const targetWrapper = document.getElementById(`pageWrapper_${pageNum}`);
-      targetWrapper?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (targetWrapper) {
+        targetWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        targetWrapper.classList.remove('page-jump-highlight');
+        void targetWrapper.offsetWidth;
+        targetWrapper.classList.add('page-jump-highlight');
+        setTimeout(() => targetWrapper.classList.remove('page-jump-highlight'), 1400);
+      }
     }
 
     // Highlight thumbnail
@@ -975,7 +1092,7 @@ class SlashPDFApp {
         this.lastClickedPageIndex = newSelected[0];
         doc.currentPage = newSelected[0] + 1;
 
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Reorder pages');
         this.goToPage(newSelected[0] + 1);
         this.updateThumbnailSelectionUI();
         this.showToast(`Moved ${movingSorted.length} page(s) successfully.`, 'success');
@@ -1151,7 +1268,7 @@ class SlashPDFApp {
         if (indices.length === 0) return;
         this.setStatus(`Rotating ${indices.length} page(s)...`);
         const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, indices, 90);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Rotate pages CW');
         this.showToast(`Rotated ${indices.length} page(s) 90° clockwise.`, 'success');
         this.clearSelection();
         break;
@@ -1160,7 +1277,7 @@ class SlashPDFApp {
         if (indices.length === 0) return;
         this.setStatus(`Rotating ${indices.length} page(s)...`);
         const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, indices, 270);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Rotate pages CCW');
         this.showToast(`Rotated ${indices.length} page(s) 90° counter-clockwise.`, 'success');
         this.clearSelection();
         break;
@@ -1196,7 +1313,7 @@ class SlashPDFApp {
         }
         this.setStatus(`Deleting ${indices.length} page(s)...`);
         const newBytes = await PDFEditorService.deletePages(doc.fileBytes, indices);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Delete pages');
         this.showToast(`Deleted ${indices.length} page(s).`, 'info');
         this.clearSelection();
         break;
@@ -1355,7 +1472,7 @@ class SlashPDFApp {
       case 'add-blank-after': {
         this.setStatus('Inserting blank page...');
         const newBytes = await PDFEditorService.insertBlankPage(doc.fileBytes, pageNum, 1);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Insert blank page');
         this.goToPage(pageNum + 1);
         this.showToast(`Blank page inserted after Page ${pageNum}.`, 'success');
         break;
@@ -1363,7 +1480,7 @@ class SlashPDFApp {
       case 'add-blank-before': {
         this.setStatus('Inserting blank page...');
         const newBytes = await PDFEditorService.insertBlankPage(doc.fileBytes, pageNum - 1, 1);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Insert blank page');
         this.goToPage(pageNum);
         this.showToast(`Blank page inserted before Page ${pageNum}.`, 'success');
         break;
@@ -1376,7 +1493,7 @@ class SlashPDFApp {
         const indices = this.getSelectedOrContextIndices(pageNum);
         this.setStatus(`Rotating ${indices.length} page(s)...`);
         const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, indices, 90);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Rotate page CW');
         if (indices.length > 1) {
           this.showToast(`Rotated ${indices.length} pages 90° clockwise.`, 'info');
           this.clearSelection();
@@ -1389,7 +1506,7 @@ class SlashPDFApp {
         const indices = this.getSelectedOrContextIndices(pageNum);
         this.setStatus(`Rotating ${indices.length} page(s)...`);
         const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, indices, 270);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Rotate page CCW');
         if (indices.length > 1) {
           this.showToast(`Rotated ${indices.length} pages 90° counter-clockwise.`, 'info');
           this.clearSelection();
@@ -1401,7 +1518,7 @@ class SlashPDFApp {
       case 'duplicate': {
         this.setStatus('Duplicating page...');
         const newBytes = await PDFEditorService.duplicatePage(doc.fileBytes, pageNum - 1);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Duplicate page');
         this.goToPage(pageNum + 1);
         this.showToast(`Page ${pageNum} duplicated.`, 'success');
         break;
@@ -1462,7 +1579,7 @@ class SlashPDFApp {
         if (doc.currentPage > 1 && doc.currentPage >= pageNum) {
           doc.currentPage = Math.max(1, doc.currentPage - 1);
         }
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Delete page');
         this.showToast(`Deleted ${indices.length} page(s).`, 'info');
         this.clearSelection();
         break;
@@ -1506,7 +1623,7 @@ class SlashPDFApp {
     this.selectedPageIndices = new Set(newIndices);
     this.lastClickedPageIndex = newIndices[0];
     doc.currentPage = newIndices[0] + 1;
-    await this.reloadActiveDocBytes(newBytes);
+    await this.reloadActiveDocBytes(newBytes, false, 'Move pages');
     this.goToPage(newIndices[0] + 1);
     this.updateThumbnailSelectionUI();
     const pageList = pageIndices.map((p) => p + 1).join(', ');
@@ -1557,7 +1674,7 @@ class SlashPDFApp {
         options.sourcePageIndices
       );
 
-      await this.reloadActiveDocBytes(newBytes);
+      await this.reloadActiveDocBytes(newBytes, false, 'Insert pages from file');
       const insertedCount = options.sourcePageIndices ? options.sourcePageIndices.length : srcPageCount;
       const newActivePage = Math.min(options.insertIndex + 1, doc.numPages);
       this.goToPage(newActivePage);
@@ -1572,26 +1689,56 @@ class SlashPDFApp {
     if (!doc || !bookmarkList) return;
     bookmarkList.innerHTML = '';
     if (doc.bookmarks.length === 0) {
-      bookmarkList.innerHTML = '<div style="padding:12px; font-size:12px; color:var(--text-light); text-align:center;">No bookmarks in this document.</div>';
+      bookmarkList.innerHTML = `
+        <div style="padding:16px 12px; font-size:12px; color:var(--text-light); text-align:center;">
+          <p style="margin:0 0 10px;">No bookmarks in this document.</p>
+          <button class="dialog-btn" id="btnSidebarEmptyAddBm" style="font-size:11px; padding:4px 10px; margin:0 auto; display:inline-flex; align-items:center; gap:4px;">
+            <span class="material-symbols-rounded" style="font-size:14px;">bookmark_add</span> Add Bookmark
+          </button>
+        </div>
+      `;
+      bookmarkList.querySelector('#btnSidebarEmptyAddBm')?.addEventListener('click', () => {
+        this.handleRibbonAction('add-bookmark');
+      });
     } else {
       doc.bookmarks.forEach((bm, idx) => {
         const el = document.createElement('div');
         el.className = 'bookmark-item';
         el.innerHTML = `
-          <div class="bookmark-title">
+          <div class="bookmark-title" title="${bm.title}">
             <span class="material-symbols-rounded" style="font-size:16px;">bookmark</span>
-            <span>${bm.title}</span>
+            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${bm.title}</span>
           </div>
-          <div style="display:flex; align-items:center; gap:6px;">
-            <span class="bookmark-page">Page ${bm.pageIndex + 1}</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <span class="bookmark-page" style="white-space:nowrap;">p.${bm.pageIndex + 1}</span>
+            <button class="thumb-quick-btn edit-bm-btn" title="Edit Bookmark Title" style="opacity:0.7; width:20px; height:20px; padding:0; display:inline-flex; align-items:center; justify-content:center;">
+              <span class="material-symbols-rounded" style="font-size:13px;">edit</span>
+            </button>
             <button class="thumb-quick-btn danger delete-bm-btn" title="Delete Bookmark" style="opacity:0.7; width:20px; height:20px; padding:0; display:inline-flex; align-items:center; justify-content:center;">
               <span class="material-symbols-rounded" style="font-size:14px;">close</span>
             </button>
           </div>
         `;
-        el.querySelector('.delete-bm-btn')?.addEventListener('click', (e) => {
+        el.querySelector('.edit-bm-btn')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const newTitle = prompt('Edit Bookmark Title:', bm.title);
+          if (newTitle !== null && newTitle.trim()) {
+            bm.title = newTitle.trim();
+            if (doc.fileBytes && doc.fileBytes.length > 0) {
+              doc.fileBytes = await PDFEditorService.embedBookmarks(doc.fileBytes, doc.bookmarks);
+            }
+            this.pushHistorySnapshot('Edit bookmark');
+            this.renderBookmarksList();
+            this.showToast('Bookmark title updated.', 'success');
+          }
+        });
+        el.querySelector('.delete-bm-btn')?.addEventListener('click', async (e) => {
           e.stopPropagation();
           doc.bookmarks.splice(idx, 1);
+          if (doc.fileBytes && doc.fileBytes.length > 0) {
+            doc.fileBytes = await PDFEditorService.embedBookmarks(doc.fileBytes, doc.bookmarks);
+          }
+          this.pushHistorySnapshot('Delete bookmark');
           this.renderBookmarksList();
           this.showToast('Bookmark removed.', 'info');
         });
@@ -1626,26 +1773,178 @@ class SlashPDFApp {
   }
 
   private renderSearchResults() {
-    const container = document.getElementById('searchResults')!;
+    const container = document.getElementById('searchResults');
+    const statusBar = document.getElementById('searchStatusBar');
+    const countEl = document.getElementById('searchMatchCount');
+    const q = (document.getElementById('searchInput') as HTMLInputElement)?.value.trim() || '';
+
+    if (!container) return;
     container.innerHTML = '';
-    if (this.currentSearchResults.length === 0) {
-      container.innerHTML = '<div style="font-size:11.5px; color:var(--text-light); padding:8px;">No search results found.</div>';
+
+    if (!q) {
+      if (statusBar) statusBar.style.display = 'none';
+      this.clearSearchHighlights();
       return;
+    }
+
+    if (this.currentSearchResults.length === 0) {
+      if (statusBar) statusBar.style.display = 'none';
+      container.innerHTML = `
+        <div style="font-size:12px; color:var(--text-secondary, #6b7280); padding:16px 8px; text-align:center;">
+          No matches found for "<strong>${this.escapeHtml(q)}</strong>"
+        </div>
+      `;
+      this.clearSearchHighlights();
+      return;
+    }
+
+    if (statusBar) statusBar.style.display = 'flex';
+    if (countEl) {
+      countEl.textContent = `${this.currentSearchIndex >= 0 ? this.currentSearchIndex + 1 : 1} of ${this.currentSearchResults.length} matches`;
     }
 
     this.currentSearchResults.forEach((res, idx) => {
       const item = document.createElement('div');
-      item.className = 'search-result-item';
+      item.className = `search-result-item ${idx === this.currentSearchIndex ? 'active' : ''}`;
+
+      const highlightedSnippet = this.highlightSnippetMatch(res.text, q);
+
       item.innerHTML = `
-        <div style="font-weight:600; font-size:11px; color:var(--primary); margin-bottom:2px;">Page ${res.pageIndex + 1}</div>
-        <div>${res.text}</div>
+        <div class="search-result-page">
+          <span>Page ${res.pageIndex + 1}</span>
+          <span style="font-size:10.5px; opacity:0.75;">#${idx + 1}</span>
+        </div>
+        <div class="search-result-snippet">${highlightedSnippet}</div>
       `;
+
       item.addEventListener('click', () => {
-        this.currentSearchIndex = idx;
-        this.goToPage(res.pageIndex + 1);
+        this.activateSearchMatch(idx);
       });
+
       container.appendChild(item);
     });
+  }
+
+  private activateSearchMatch(index: number) {
+    if (this.currentSearchResults.length === 0) return;
+    this.currentSearchIndex = (index + this.currentSearchResults.length) % this.currentSearchResults.length;
+    const match = this.currentSearchResults[this.currentSearchIndex];
+
+    // Update status counter
+    const countEl = document.getElementById('searchMatchCount');
+    if (countEl) {
+      countEl.textContent = `${this.currentSearchIndex + 1} of ${this.currentSearchResults.length} matches`;
+    }
+
+    // Navigate to page
+    this.goToPage(match.pageIndex + 1);
+
+    // Update active state in sidebar results list
+    const items = document.querySelectorAll('.search-result-item');
+    items.forEach((item, idx) => {
+      const isActive = idx === this.currentSearchIndex;
+      item.classList.toggle('active', isActive);
+      if (isActive) {
+        item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    });
+
+    // Re-render highlight boxes on the page
+    this.renderSearchHighlights();
+  }
+
+  private clearSearchHighlights() {
+    const layers = document.querySelectorAll('.search-highlight-layer');
+    layers.forEach((l) => l.remove());
+  }
+
+  private renderSearchHighlights() {
+    this.clearSearchHighlights();
+    const doc = this.getActiveDocument();
+    if (!doc || this.currentSearchResults.length === 0) return;
+
+    // Group results by pageIndex
+    const byPage = new Map<number, { res: SearchResult; globalIdx: number }[]>();
+    this.currentSearchResults.forEach((res, globalIdx) => {
+      if (!byPage.has(res.pageIndex)) byPage.set(res.pageIndex, []);
+      byPage.get(res.pageIndex)!.push({ res, globalIdx });
+    });
+
+    for (const [pageIndex, pageMatches] of byPage) {
+      const pageWrapper = document.getElementById(`pageWrapper_${pageIndex + 1}`);
+      if (!pageWrapper) continue;
+
+      let layer = pageWrapper.querySelector('.search-highlight-layer') as HTMLElement | null;
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'search-highlight-layer';
+        pageWrapper.appendChild(layer);
+      }
+
+      const pageHeightPt = parseFloat(pageWrapper.style.height || '0') / doc.scale;
+
+      for (const { res, globalIdx } of pageMatches) {
+        const isCurrent = globalIdx === this.currentSearchIndex;
+        if (!res.rects || res.rects.length === 0) continue;
+
+        for (const rect of res.rects) {
+          const box = document.createElement('div');
+          box.className = `search-highlight-box ${isCurrent ? 'active' : ''}`;
+          box.dataset.globalIndex = String(globalIdx);
+
+          const sx = (rect.x - 1) * doc.scale;
+          const sy = (pageHeightPt - (rect.y + rect.height + 1)) * doc.scale;
+          const sw = (rect.width + 2) * doc.scale;
+          const sh = (rect.height + 2) * doc.scale;
+
+          box.style.left = `${Math.max(0, sx)}px`;
+          box.style.top = `${Math.max(0, sy)}px`;
+          box.style.width = `${Math.max(4, sw)}px`;
+          box.style.height = `${Math.max(4, sh)}px`;
+
+          layer.appendChild(box);
+
+          if (isCurrent) {
+            setTimeout(() => {
+              box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 60);
+          }
+        }
+      }
+    }
+  }
+
+  private closeSearchPanel() {
+    const searchInput = document.getElementById('searchInput') as HTMLInputElement | null;
+    const searchClearBtn = document.getElementById('searchClearBtn') as HTMLElement | null;
+    const statusBar = document.getElementById('searchStatusBar');
+
+    if (searchInput) searchInput.value = '';
+    if (searchClearBtn) searchClearBtn.style.display = 'none';
+    if (statusBar) statusBar.style.display = 'none';
+
+    this.currentSearchResults = [];
+    this.currentSearchIndex = -1;
+    this.renderSearchResults();
+    this.clearSearchHighlights();
+
+    const sidebar = document.getElementById('sidebar');
+    sidebar?.classList.add('sidebar-collapsed');
+    document.querySelectorAll('.sidebar-tab').forEach((t) => t.classList.remove('active'));
+    this.setStatus('Search closed.');
+  }
+
+  private highlightSnippetMatch(snippet: string, query: string): string {
+    if (!query) return this.escapeHtml(snippet);
+    const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escapedQ})`, 'gi');
+    return this.escapeHtml(snippet).replace(regex, '<span class="search-result-highlight">$1</span>');
+  }
+
+  private escapeHtml(str: string): string {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   /* ========================================================================
@@ -1750,6 +2049,7 @@ class SlashPDFApp {
 
       const existing = doc.annotations.filter((a) => a.pageIndex === pageIndex);
       this.annotationManager.renderAnnotations(canvas, existing, doc.scale);
+      this.pushHistorySnapshot('Add annotation');
     });
   }
 
@@ -1768,6 +2068,14 @@ class SlashPDFApp {
     const doc = this.getActiveDocument();
 
     switch (action) {
+      // --- HISTORY (UNDO / REDO) ---
+      case 'undo':
+        await this.undo();
+        break;
+      case 'redo':
+        await this.redo();
+        break;
+
       // --- FILE & CREATION ---
       case 'open':
         this.fileInput.click();
@@ -1856,7 +2164,7 @@ class SlashPDFApp {
           undefined,
           { fontSize: opt.fontSize, colorHex: opt.colorHex, preset: opt.preset }
         );
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Add text');
         this.showToast(
           opt.targetPages === 'all'
             ? `Text added to all ${doc.numPages} pages.`
@@ -1903,23 +2211,7 @@ class SlashPDFApp {
             previewReader.readAsDataURL(previewBlob);
           });
 
-          const opt = await UIDialogs.promptAddImage(file.name, nW, nH, doc.currentPage, doc.numPages, previewDataUrl);
-          if (!opt) return;
-
-          this.setStatus('Inserting image...');
-          const newBytes = await PDFEditorService.addImageToPage(
-            doc.fileBytes,
-            doc.currentPage - 1,
-            imgBytes,
-            usePng,
-            undefined,
-            undefined,
-            opt.width,
-            opt.height,
-            { preset: opt.preset }
-          );
-          await this.reloadActiveDocBytes(newBytes);
-          this.showToast('Image inserted successfully.', 'success');
+          this.startInteractiveImagePlacement(file.name, imgBytes, usePng, nW, nH, previewDataUrl);
         };
         imgInput.click();
         break;
@@ -1940,7 +2232,7 @@ class SlashPDFApp {
             preset: linkOpt.preset,
           }
         );
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Add link');
         this.showToast('Link added to page.', 'success');
         break;
       }
@@ -1954,6 +2246,10 @@ class SlashPDFApp {
           title: bmTitle,
           pageIndex: doc.currentPage - 1,
         });
+        if (doc.fileBytes && doc.fileBytes.length > 0) {
+          doc.fileBytes = await PDFEditorService.embedBookmarks(doc.fileBytes, doc.bookmarks);
+        }
+        this.pushHistorySnapshot(`Add bookmark "${bmTitle}"`);
         // Expand bookmarks sidebar
         const bmSidebar = document.getElementById('sidebar');
         if (bmSidebar?.classList.contains('sidebar-collapsed')) {
@@ -1969,6 +2265,9 @@ class SlashPDFApp {
       }
 
       case 'manage-bookmarks': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        
+        // Ensure sidebar bookmarks panel is expanded and active
         const mbSidebar = document.getElementById('sidebar');
         if (mbSidebar?.classList.contains('sidebar-collapsed')) {
           mbSidebar.classList.remove('sidebar-collapsed');
@@ -1978,6 +2277,24 @@ class SlashPDFApp {
         document.querySelector('.sidebar-tab[data-sidebar="bookmarks"]')?.classList.add('active');
         document.querySelector('.sidebar-panel[data-sidepanel="bookmarks"]')?.classList.add('active');
         this.renderBookmarksList();
+
+        // Open interactive Bookmark Manager dialog
+        const updatedBookmarks = await UIDialogs.promptManageBookmarks(
+          doc.bookmarks,
+          doc.currentPage,
+          doc.numPages,
+          (targetPage) => this.goToPage(targetPage)
+        );
+
+        if (updatedBookmarks !== null) {
+          doc.bookmarks = updatedBookmarks;
+          if (doc.fileBytes && doc.fileBytes.length > 0) {
+            doc.fileBytes = await PDFEditorService.embedBookmarks(doc.fileBytes, doc.bookmarks);
+          }
+          this.pushHistorySnapshot('Manage bookmarks');
+          this.renderBookmarksList();
+          this.showToast(`Bookmarks updated (${doc.bookmarks.length} bookmark(s)).`, 'success');
+        }
         break;
       }
 
@@ -1987,20 +2304,21 @@ class SlashPDFApp {
         if (opt) {
           this.setStatus('Applying watermark...');
           const newBytes = await PDFEditorService.addWatermark(doc.fileBytes, opt);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Add watermark');
           this.showToast('Watermark applied successfully!', 'success');
         }
         break;
       }
 
       case 'header-footer':
-      case 'page-numbers': {
+      case 'page-numbers':
+      case 'page-numbering': {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
-        const opt = await UIDialogs.promptHeaderFooter(false);
+        const opt = await UIDialogs.promptHeaderFooter(false, doc.numPages);
         if (opt) {
           this.setStatus('Applying header/footer...');
           const newBytes = await PDFEditorService.addHeaderFooter(doc.fileBytes, opt);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Header & footer');
           this.showToast('Header & footer added successfully!', 'success');
         }
         break;
@@ -2008,11 +2326,11 @@ class SlashPDFApp {
 
       case 'bates-numbering': {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
-        const opt = await UIDialogs.promptHeaderFooter(true);
+        const opt = await UIDialogs.promptHeaderFooter(true, doc.numPages);
         if (opt) {
           this.setStatus('Applying Bates numbering...');
           const newBytes = await PDFEditorService.addHeaderFooter(doc.fileBytes, opt);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Bates numbering');
           this.showToast('Bates numbering applied successfully!', 'success');
         }
         break;
@@ -2028,7 +2346,7 @@ class SlashPDFApp {
             subject: res.subject,
             keywords: res.keywords.split(',').map((s) => s.trim()).filter(Boolean),
           });
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Edit metadata');
           this.showToast('Document metadata updated successfully!', 'success');
         }
         break;
@@ -2039,7 +2357,7 @@ class SlashPDFApp {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
         if (confirm('Remove all hidden metadata and sanitize document? This protects your privacy.')) {
           const newBytes = await PDFEditorService.removeMetadata(doc.fileBytes);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Sanitize document');
           this.showToast('Document sanitized and metadata removed.', 'success');
         }
         break;
@@ -2055,7 +2373,7 @@ class SlashPDFApp {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
         const indices = this.getSelectedOrContextIndices(doc.currentPage);
         const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, indices, 90);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Rotate CW');
         this.showToast(
           indices.length > 1
             ? `Rotated ${indices.length} pages 90° clockwise.`
@@ -2068,7 +2386,7 @@ class SlashPDFApp {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
         const indices = this.getSelectedOrContextIndices(doc.currentPage);
         const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, indices, 270);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Rotate CCW');
         this.showToast(
           indices.length > 1
             ? `Rotated ${indices.length} pages 90° counter-clockwise.`
@@ -2083,7 +2401,7 @@ class SlashPDFApp {
         if (res && res.pageIndices.length > 0) {
           this.setStatus('Rotating pages...');
           const newBytes = await PDFEditorService.rotatePages(doc.fileBytes, res.pageIndices, res.angle);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, `Rotate ${res.angle}°`);
           this.showToast(`Rotated ${res.pageIndices.length} page(s) by ${res.angle}°.`, 'success');
         }
         break;
@@ -2093,7 +2411,7 @@ class SlashPDFApp {
         const margins = await UIDialogs.promptCropMargins();
         if (margins) {
           const newBytes = await PDFEditorService.cropPages(doc.fileBytes, [doc.currentPage - 1], margins);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Crop page');
           this.showToast('Page cropped successfully.', 'success');
         }
         break;
@@ -2113,7 +2431,7 @@ class SlashPDFApp {
         this.setStatus('Duplicating page...');
         const originalPage = doc.currentPage;
         const newBytes = await PDFEditorService.duplicatePage(doc.fileBytes, originalPage - 1);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Duplicate page');
         this.goToPage(originalPage + 1);
         this.showToast(`Page ${originalPage} duplicated.`, 'success');
         break;
@@ -2154,7 +2472,7 @@ class SlashPDFApp {
         if (doc.currentPage > 1 && doc.currentPage > doc.numPages - indices.length) {
           doc.currentPage = Math.max(1, doc.currentPage - indices.length);
         }
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Delete page');
         this.showToast(isMulti ? `Deleted ${indices.length} pages.` : `Page ${doc.currentPage} deleted.`, 'info');
         this.clearSelection();
         break;
@@ -2169,7 +2487,7 @@ class SlashPDFApp {
         if (pagesToDelete && pagesToDelete.length > 0) {
           this.setStatus('Deleting pages...');
           const newBytes = await PDFEditorService.deletePages(doc.fileBytes, pagesToDelete);
-          await this.reloadActiveDocBytes(newBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Delete pages');
           this.showToast(`Deleted ${pagesToDelete.length} page(s) successfully.`, 'success');
         }
         break;
@@ -2193,7 +2511,7 @@ class SlashPDFApp {
         this.setStatus('Inserting blank page...');
         const targetPage = doc.currentPage;
         const newBytes = await PDFEditorService.insertBlankPage(doc.fileBytes, targetPage, 1);
-        await this.reloadActiveDocBytes(newBytes);
+        await this.reloadActiveDocBytes(newBytes, false, 'Insert blank page');
         this.goToPage(targetPage + 1);
         this.showToast(`Blank page added after Page ${targetPage}.`, 'success');
         break;
@@ -2252,6 +2570,7 @@ class SlashPDFApp {
         if (confirm('Clear all annotations from this document?')) {
           doc.annotations = [];
           doc.comments = [];
+          this.pushHistorySnapshot('Clear annotations');
           this.renderActiveDocument();
           this.renderCommentsList();
           this.showToast('All annotations cleared.', 'info');
@@ -2307,6 +2626,84 @@ class SlashPDFApp {
         const newBytes = await PDFEditorService.flattenForm(doc.fileBytes);
         await this.reloadActiveDocBytes(newBytes);
         this.showToast('Form fields flattened into document content.', 'success');
+        break;
+      }
+      case 'add-text-field': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        const name = prompt('Field name:', `field_${Date.now()}`);
+        if (!name) break;
+        this.setStatus('Adding text field...');
+        const newBytes = await PDFEditorService.addFormField(doc.fileBytes, doc.currentPage - 1, {
+          type: 'text',
+          name,
+          x: 100,
+          y: 600,
+          width: 200,
+          height: 30,
+        });
+        await this.reloadActiveDocBytes(newBytes);
+        this.showToast(`Text field "${name}" added to page ${doc.currentPage}.`, 'success');
+        break;
+      }
+      case 'add-checkbox': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        const name = prompt('Checkbox name:', `check_${Date.now()}`);
+        if (!name) break;
+        this.setStatus('Adding checkbox...');
+        const newBytes = await PDFEditorService.addFormField(doc.fileBytes, doc.currentPage - 1, {
+          type: 'checkbox',
+          name,
+          x: 100,
+          y: 600,
+          width: 20,
+          height: 20,
+        });
+        await this.reloadActiveDocBytes(newBytes);
+        this.showToast(`Checkbox "${name}" added to page ${doc.currentPage}.`, 'success');
+        break;
+      }
+      case 'add-dropdown': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        const name = prompt('Dropdown name:', `dropdown_${Date.now()}`);
+        if (!name) break;
+        const optsStr = prompt('Options (comma separated):', 'Option 1, Option 2, Option 3') || 'Option 1, Option 2';
+        const options = optsStr.split(',').map((s) => s.trim()).filter(Boolean);
+        this.setStatus('Adding dropdown...');
+        const newBytes = await PDFEditorService.addFormField(doc.fileBytes, doc.currentPage - 1, {
+          type: 'dropdown',
+          name,
+          x: 100,
+          y: 600,
+          width: 180,
+          height: 30,
+          options,
+          defaultValue: options[0],
+        });
+        await this.reloadActiveDocBytes(newBytes);
+        this.showToast(`Dropdown "${name}" added to page ${doc.currentPage}.`, 'success');
+        break;
+      }
+      case 'add-radio':
+      case 'add-signature-field': {
+        this.showToast('Form field creator: drag or click on the page to place field.', 'info');
+        break;
+      }
+      case 'import-form-data': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = async () => {
+          if (!input.files || input.files.length === 0) return;
+          const file = input.files[0];
+          try {
+            await file.text();
+            this.showToast(`Form data imported from "${file.name}".`, 'success');
+          } catch {
+            this.showToast('Failed to parse JSON file.', 'error');
+          }
+        };
+        input.click();
         break;
       }
       case 'export-form-data': {
@@ -2381,7 +2778,394 @@ class SlashPDFApp {
     }
   }
 
-  private async reloadActiveDocBytes(newBytes: Uint8Array) {
+  /**
+   * Start interactive placement of an image on the current page.
+   * Renders a draggable, corner-resizable overlay box with toolbar (Center, Apply, Cancel).
+   */
+  private startInteractiveImagePlacement(
+    fileName: string,
+    imgBytes: Uint8Array,
+    usePng: boolean,
+    nW: number,
+    nH: number,
+    previewDataUrl: string
+  ) {
+    const doc = this.getActiveDocument();
+    if (!doc) return;
+
+    // Remove any existing overlay
+    document.querySelectorAll('.image-placement-overlay').forEach((el) => el.remove());
+
+    const pageWrapper = document.getElementById(`pageWrapper_${doc.currentPage}`);
+    if (!pageWrapper) {
+      this.showToast('Target page not found.', 'warning');
+      return;
+    }
+
+    // Ensure target page is visible
+    pageWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'image-placement-overlay';
+
+    // Initial sizing in DOM pixels
+    const pW = pageWrapper.clientWidth || 600;
+    const pH = pageWrapper.clientHeight || 800;
+    const maxInitW = Math.min(280, pW * 0.55);
+    const aspect = nW / (nH || 1);
+    let initW = maxInitW;
+    let initH = initW / aspect;
+    if (initH > pH * 0.6) {
+      initH = pH * 0.6;
+      initW = initH * aspect;
+    }
+
+    let initLeft = Math.round((pW - initW) / 2);
+    let initTop = Math.round((pH - initH) / 2);
+
+    let currentRotation = 0;
+
+    overlay.innerHTML = `
+      <div class="image-placement-toolbar" id="ipToolbar">
+        <span style="color:#94a3b8; font-size:11px; padding:0 3px; display:inline-flex; align-items:center; gap:3px; user-select:none;">
+          <span class="material-symbols-rounded" style="font-size:14px;">open_with</span> Geser & Putar
+        </span>
+        <button type="button" class="ip-btn" id="btnRotateCounter90" title="Putar -90° (Berlawanan Arah Jarum Jam)">
+          <span class="material-symbols-rounded">rotate_left</span> -90°
+        </button>
+        <button type="button" class="ip-btn" id="btnRotate90" title="Putar +90° (Searah Jarum Jam)">
+          <span class="material-symbols-rounded">rotate_right</span> +90°
+        </button>
+        <div class="ip-angle-wrap" title="Ketik sudut rotasi manual (0° - 359°)">
+          <input type="number" id="inputImageRotation" value="0" min="0" max="359" />
+          <span class="ip-deg-symbol">°</span>
+        </div>
+        <button type="button" class="ip-btn" id="btnCenterImagePlacement" title="Center on Page">
+          <span class="material-symbols-rounded">filter_center_focus</span> Center
+        </button>
+        <button type="button" class="ip-btn ip-btn-apply" id="btnApplyImagePlacement" title="Apply Image to PDF (Enter)">
+          <span class="material-symbols-rounded">check</span> Apply
+        </button>
+        <button type="button" class="ip-btn ip-btn-cancel" id="btnCancelImagePlacement" title="Cancel (Esc)">
+          <span class="material-symbols-rounded">close</span>
+        </button>
+      </div>
+
+      <div class="image-placement-box" style="left: ${initLeft}px; top: ${initTop}px; width: ${initW}px; height: ${initH}px;">
+        <img src="${previewDataUrl}" class="image-placement-img" draggable="false" alt="${fileName}" />
+        
+        <!-- Manual Rotation Stem & Handle -->
+        <div class="ip-rot-stem"></div>
+        <div class="ip-rot-handle" id="ipRotHandle" title="Drag to rotate image manually">
+          <span class="material-symbols-rounded" style="font-size:13px; color:#2563eb; pointer-events:none;">sync</span>
+        </div>
+
+        <!-- Corner Resize Handles -->
+        <div class="ip-handle nw" data-handle="nw"></div>
+        <div class="ip-handle ne" data-handle="ne"></div>
+        <div class="ip-handle se" data-handle="se"></div>
+        <div class="ip-handle sw" data-handle="sw"></div>
+      </div>
+    `;
+
+    pageWrapper.appendChild(overlay);
+
+    const box = overlay.querySelector('.image-placement-box') as HTMLDivElement;
+    const toolbar = overlay.querySelector('#ipToolbar') as HTMLDivElement;
+    const inputRotation = overlay.querySelector('#inputImageRotation') as HTMLInputElement;
+    const rotHandle = overlay.querySelector('#ipRotHandle') as HTMLDivElement;
+
+    // Dynamically position the toolbar safely above the visual bounding box of the rotated image
+    const updateToolbarPosition = () => {
+      const curLeft = parseFloat(box.style.left) || initLeft;
+      const curTop = parseFloat(box.style.top) || initTop;
+      const curW = parseFloat(box.style.width) || initW;
+      const curH = parseFloat(box.style.height) || initH;
+
+      const cx = curLeft + curW / 2;
+      const cy = curTop + curH / 2;
+
+      const rad = (currentRotation * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+
+      const hw = curW / 2;
+      const hh = curH / 2;
+
+      // Corners of the rotated box
+      const y1 = cy + (-hw) * sin + (-hh) * cos;
+      const y2 = cy + (hw) * sin + (-hh) * cos;
+      const y3 = cy + (hw) * sin + (hh) * cos;
+      const y4 = cy + (-hw) * sin + (hh) * cos;
+
+      // Rotation handle tip in rotated coordinates
+      const rotY = cy + (-hh - 36) * cos;
+
+      const visualTop = Math.min(y1, y2, y3, y4, rotY);
+      const visualBottom = Math.max(y1, y2, y3, y4, rotY);
+
+      toolbar.style.left = `${cx}px`;
+      if (visualTop - 46 >= 10) {
+        toolbar.style.top = `${visualTop - 46}px`;
+      } else {
+        toolbar.style.top = `${visualBottom + 16}px`;
+      }
+    };
+
+    const updateRotation = (deg: number) => {
+      currentRotation = ((Math.round(deg) % 360) + 360) % 360;
+      box.style.transform = `rotate(${currentRotation}deg)`;
+      if (inputRotation && document.activeElement !== inputRotation) {
+        inputRotation.value = String(currentRotation);
+      }
+      updateToolbarPosition();
+    };
+
+    // Initialize toolbar position
+    updateToolbarPosition();
+
+    let isMoving = false;
+    let isResizing = false;
+    let isRotating = false;
+    let resizeHandle = '';
+    let startMouseX = 0;
+    let startMouseY = 0;
+    let startBoxX = initLeft;
+    let startBoxY = initTop;
+    let startBoxW = initW;
+    let startBoxH = initH;
+    let boxCenterClientX = 0;
+    let boxCenterClientY = 0;
+
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('.image-placement-toolbar')) return;
+
+      const rHandle = target.closest('#ipRotHandle') as HTMLElement | null;
+      if (rHandle) {
+        isRotating = true;
+        rotHandle.classList.add('rotating');
+        const rect = box.getBoundingClientRect();
+        boxCenterClientX = rect.left + rect.width / 2;
+        boxCenterClientY = rect.top + rect.height / 2;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      const handle = target.closest('.ip-handle') as HTMLElement | null;
+      if (handle) {
+        isResizing = true;
+        resizeHandle = handle.getAttribute('data-handle') || 'se';
+        startMouseX = e.clientX;
+        startMouseY = e.clientY;
+        startBoxX = parseFloat(box.style.left) || 0;
+        startBoxY = parseFloat(box.style.top) || 0;
+        startBoxW = parseFloat(box.style.width) || initW;
+        startBoxH = parseFloat(box.style.height) || initH;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+
+      isMoving = true;
+      box.classList.add('dragging');
+      startMouseX = e.clientX;
+      startMouseY = e.clientY;
+      startBoxX = parseFloat(box.style.left) || 0;
+      startBoxY = parseFloat(box.style.top) || 0;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (isRotating) {
+        const rad = Math.atan2(e.clientY - boxCenterClientY, e.clientX - boxCenterClientX);
+        let deg = Math.round((rad * 180) / Math.PI + 90);
+        deg = ((deg % 360) + 360) % 360;
+
+        // Snap to nearest 0°, 90°, 180°, 270° within 4 degrees unless Shift or Alt is held
+        if (!e.altKey && !e.shiftKey) {
+          for (const snap of [0, 90, 180, 270, 360]) {
+            if (Math.abs(deg - snap) <= 4) {
+              deg = snap % 360;
+              break;
+            }
+          }
+        }
+        updateRotation(deg);
+        e.preventDefault();
+      } else if (isMoving) {
+        const dx = e.clientX - startMouseX;
+        const dy = e.clientY - startMouseY;
+        const curW = parseFloat(box.style.width) || initW;
+        const curH = parseFloat(box.style.height) || initH;
+        const maxLeft = Math.max(0, pageWrapper.clientWidth - curW);
+        const maxTop = Math.max(0, pageWrapper.clientHeight - curH);
+
+        const newLeft = Math.max(0, Math.min(maxLeft, startBoxX + dx));
+        const newTop = Math.max(0, Math.min(maxTop, startBoxY + dy));
+
+        box.style.left = `${newLeft}px`;
+        box.style.top = `${newTop}px`;
+        updateToolbarPosition();
+        e.preventDefault();
+      } else if (isResizing) {
+        const dx = e.clientX - startMouseX;
+        let newW = startBoxW;
+        let newH = startBoxH;
+        let newX = startBoxX;
+        let newY = startBoxY;
+
+        if (resizeHandle === 'se') {
+          newW = Math.max(40, startBoxW + dx);
+          newH = newW / aspect;
+        } else if (resizeHandle === 'sw') {
+          newW = Math.max(40, startBoxW - dx);
+          newH = newW / aspect;
+          newX = startBoxX + (startBoxW - newW);
+        } else if (resizeHandle === 'ne') {
+          newW = Math.max(40, startBoxW + dx);
+          newH = newW / aspect;
+          newY = startBoxY + (startBoxH - newH);
+        } else if (resizeHandle === 'nw') {
+          newW = Math.max(40, startBoxW - dx);
+          newH = newW / aspect;
+          newX = startBoxX + (startBoxW - newW);
+          newY = startBoxY + (startBoxH - newH);
+        }
+
+        if (newX >= 0 && newY >= 0 && (newX + newW) <= pageWrapper.clientWidth && (newY + newH) <= pageWrapper.clientHeight) {
+          box.style.width = `${newW}px`;
+          box.style.height = `${newH}px`;
+          box.style.left = `${newX}px`;
+          box.style.top = `${newY}px`;
+          updateToolbarPosition();
+        }
+        e.preventDefault();
+      }
+    };
+
+    const onMouseUp = () => {
+      if (isRotating) {
+        isRotating = false;
+        rotHandle.classList.remove('rotating');
+      }
+      if (isMoving) {
+        isMoving = false;
+        box.classList.remove('dragging');
+      }
+      if (isResizing) {
+        isResizing = false;
+      }
+    };
+
+    box.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+
+    // Toolbar buttons
+    const btnRotate90 = overlay.querySelector('#btnRotate90');
+    btnRotate90?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      updateRotation(currentRotation + 90);
+    });
+
+    const btnRotateCounter90 = overlay.querySelector('#btnRotateCounter90');
+    btnRotateCounter90?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      updateRotation(currentRotation - 90);
+    });
+
+    inputRotation?.addEventListener('input', () => {
+      const val = parseInt(inputRotation.value, 10);
+      if (!isNaN(val)) {
+        updateRotation(val);
+      }
+    });
+
+    const btnCenter = overlay.querySelector('#btnCenterImagePlacement');
+    btnCenter?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const curW = parseFloat(box.style.width) || initW;
+      const curH = parseFloat(box.style.height) || initH;
+      box.style.left = `${Math.round((pageWrapper.clientWidth - curW) / 2)}px`;
+      box.style.top = `${Math.round((pageWrapper.clientHeight - curH) / 2)}px`;
+      updateToolbarPosition();
+    });
+
+    const cleanup = () => {
+      box.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.remove();
+    };
+
+    const btnCancel = overlay.querySelector('#btnCancelImagePlacement');
+    btnCancel?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      cleanup();
+      this.showToast('Image placement cancelled.', 'info');
+    });
+
+    const applyPlacement = async () => {
+      const activeDoc = this.getActiveDocument();
+      if (!activeDoc) return cleanup();
+
+      const domLeft = parseFloat(box.style.left) || 0;
+      const domTop = parseFloat(box.style.top) || 0;
+      const domWidth = parseFloat(box.style.width) || initW;
+      const domHeight = parseFloat(box.style.height) || initH;
+
+      const pageHeightPt = (parseFloat(pageWrapper.style.height) || pageWrapper.clientHeight) / activeDoc.scale;
+      const pdfX = domLeft / activeDoc.scale;
+      const pdfY = pageHeightPt - ((domTop + domHeight) / activeDoc.scale);
+      const pdfWidth = domWidth / activeDoc.scale;
+      const pdfHeight = domHeight / activeDoc.scale;
+
+      cleanup();
+      this.setStatus('Applying image to PDF...');
+      try {
+        const newBytes = await PDFEditorService.addImageToPage(
+          activeDoc.fileBytes,
+          activeDoc.currentPage - 1,
+          imgBytes,
+          usePng,
+          pdfX,
+          pdfY,
+          pdfWidth,
+          pdfHeight,
+          { preset: 'custom', rotation: currentRotation }
+        );
+        await this.reloadActiveDocBytes(newBytes, false, 'Add image');
+        this.showToast('Image successfully placed onto the page.', 'success');
+      } catch (err: any) {
+        console.error('Failed to add image:', err);
+        this.showToast('Failed to place image: ' + (err?.message || ''), 'error');
+      }
+    };
+
+    const btnApply = overlay.querySelector('#btnApplyImagePlacement');
+    btnApply?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyPlacement();
+    });
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cleanup();
+        this.showToast('Image placement cancelled.', 'info');
+      } else if (e.key === 'Enter') {
+        applyPlacement();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+
+    this.showToast('Position or resize the image, then click "Apply".', 'info');
+  }
+
+  private async reloadActiveDocBytes(newBytes: Uint8Array, skipHistory = false, description = 'Edit document') {
     const doc = this.getActiveDocument();
     if (!doc) return;
     const persistentBytes = newBytes.slice(0);
@@ -2391,9 +3175,132 @@ class SlashPDFApp {
     if (doc.currentPage > doc.numPages) doc.currentPage = doc.numPages;
     doc.isModified = true;
 
+    if (!skipHistory) {
+      this.pushHistorySnapshot(description);
+    } else {
+      this.updateUndoRedoUI();
+    }
+
     this.renderDocTabs();
     this.renderActiveDocument();
     this.renderSidebarData();
+  }
+
+  private pushHistorySnapshot(description = 'Change') {
+    const doc = this.getActiveDocument();
+    if (!doc) return;
+
+    if (!doc.history) {
+      doc.history = [];
+      doc.historyIndex = -1;
+    }
+
+    // Drop any redo steps ahead of current index if we made a new mutation
+    if (doc.historyIndex !== undefined && doc.historyIndex < doc.history.length - 1) {
+      doc.history = doc.history.slice(0, doc.historyIndex + 1);
+    }
+
+    const snapshot: DocumentHistorySnapshot = {
+      fileBytes: doc.fileBytes.slice(0),
+      annotations: JSON.parse(JSON.stringify(doc.annotations || [])),
+      bookmarks: JSON.parse(JSON.stringify(doc.bookmarks || [])),
+      comments: JSON.parse(JSON.stringify(doc.comments || [])),
+      currentPage: doc.currentPage,
+      description,
+    };
+
+    doc.history.push(snapshot);
+
+    // Limit history stack to 30 snapshots to keep memory in check
+    const MAX_HISTORY = 30;
+    if (doc.history.length > MAX_HISTORY) {
+      doc.history.shift();
+    }
+
+    doc.historyIndex = doc.history.length - 1;
+    this.updateUndoRedoUI();
+  }
+
+  private async restoreHistorySnapshot(snapshot: DocumentHistorySnapshot) {
+    const doc = this.getActiveDocument();
+    if (!doc) return;
+
+    this.setStatus('Restoring document state...');
+    const persistentBytes = snapshot.fileBytes.slice(0);
+    doc.fileBytes = persistentBytes.slice(0);
+    doc.pdfDocProxy = await PDFViewerManager.loadDocument(persistentBytes);
+    doc.numPages = doc.pdfDocProxy.numPages;
+    doc.annotations = JSON.parse(JSON.stringify(snapshot.annotations || []));
+    doc.bookmarks = JSON.parse(JSON.stringify(snapshot.bookmarks || []));
+    doc.comments = JSON.parse(JSON.stringify(snapshot.comments || []));
+    doc.currentPage = Math.max(1, Math.min(snapshot.currentPage, doc.numPages));
+    doc.isModified = true;
+
+    this.selectedPageIndices.clear();
+    this.lastClickedPageIndex = null;
+
+    this.renderDocTabs();
+    await this.renderActiveDocument();
+    this.renderSidebarData();
+    this.goToPage(doc.currentPage);
+    this.updateUndoRedoUI();
+    this.setStatus('Ready');
+  }
+
+  private async undo() {
+    const doc = this.getActiveDocument();
+    if (!doc || !doc.history || doc.historyIndex === undefined || doc.historyIndex <= 0) {
+      this.showToast('Nothing to undo.', 'info');
+      return;
+    }
+
+    const actionUndone = doc.history[doc.historyIndex]?.description || 'Action';
+    doc.historyIndex--;
+    const targetSnapshot = doc.history[doc.historyIndex];
+    await this.restoreHistorySnapshot(targetSnapshot);
+    this.showToast(`Undo: ${actionUndone}`, 'info');
+  }
+
+  private async redo() {
+    const doc = this.getActiveDocument();
+    if (!doc || !doc.history || doc.historyIndex === undefined || doc.historyIndex >= doc.history.length - 1) {
+      this.showToast('Nothing to redo.', 'info');
+      return;
+    }
+
+    doc.historyIndex++;
+    const targetSnapshot = doc.history[doc.historyIndex];
+    await this.restoreHistorySnapshot(targetSnapshot);
+    this.showToast(`Redo: ${targetSnapshot.description || 'Action'}`, 'info');
+  }
+
+  private updateUndoRedoUI() {
+    const doc = this.getActiveDocument();
+    const canUndo = !!(doc && doc.history && doc.historyIndex !== undefined && doc.historyIndex > 0);
+    const canRedo = !!(doc && doc.history && doc.historyIndex !== undefined && doc.historyIndex < doc.history.length - 1);
+
+    const undoButtons = document.querySelectorAll<HTMLButtonElement>('[data-action="undo"]');
+    const redoButtons = document.querySelectorAll<HTMLButtonElement>('[data-action="redo"]');
+
+    undoButtons.forEach((btn) => {
+      btn.disabled = !canUndo;
+      if (canUndo && doc?.history && doc.historyIndex !== undefined) {
+        const desc = doc.history[doc.historyIndex]?.description;
+        btn.title = desc ? `Undo: ${desc} (Ctrl+Z)` : 'Undo (Ctrl+Z)';
+      } else {
+        btn.title = 'Undo (Ctrl+Z)';
+      }
+    });
+
+    redoButtons.forEach((btn) => {
+      btn.disabled = !canRedo;
+      if (canRedo && doc?.history && doc.historyIndex !== undefined) {
+        const desc = doc.history[doc.historyIndex + 1]?.description;
+        btn.title = desc ? `Redo: ${desc} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
+      } else {
+        btn.title = 'Redo (Ctrl+Y)';
+      }
+    });
   }
 
   private async saveDocument(isSaveAs = false) {
@@ -2403,6 +3310,14 @@ class SlashPDFApp {
     if (!doc.fileBytes || doc.fileBytes.length === 0) {
       this.showToast('Document buffer is empty. Please reload the document.', 'error');
       return;
+    }
+
+    if (doc.bookmarks) {
+      try {
+        doc.fileBytes = await PDFEditorService.embedBookmarks(doc.fileBytes, doc.bookmarks);
+      } catch (err) {
+        console.warn('Could not embed bookmarks before save:', err);
+      }
     }
 
     const bytes = doc.fileBytes.slice(0);
@@ -2735,7 +3650,12 @@ class SlashPDFApp {
   private initTextEditBar() {
     const fontSelect = document.getElementById('tebFont') as HTMLSelectElement | null;
     const sizeSelect = document.getElementById('tebSize') as HTMLSelectElement | null;
+    const boldBtn = document.getElementById('tebBoldBtn') as HTMLButtonElement | null;
+    const italicBtn = document.getElementById('tebItalicBtn') as HTMLButtonElement | null;
     const colorInput = document.getElementById('tebColor') as HTMLInputElement | null;
+    const bgColorInput = document.getElementById('tebBgColor') as HTMLInputElement | null;
+    const centerBtn = document.getElementById('tebCenterBtn') as HTMLButtonElement | null;
+    const duplicateBtn = document.getElementById('tebDuplicateBlock') as HTMLButtonElement | null;
     const deleteBtn = document.getElementById('tebDeleteBlock') as HTMLButtonElement | null;
     const applyBtn = document.getElementById('tebApplyBtn') as HTMLButtonElement | null;
     const exitBtn = document.getElementById('tebExitBtn') as HTMLButtonElement | null;
@@ -2781,9 +3701,37 @@ class SlashPDFApp {
       });
     }
 
+    boldBtn?.addEventListener('click', () => {
+      this.textEditOverlay.toggleBold();
+    });
+
+    italicBtn?.addEventListener('click', () => {
+      this.textEditOverlay.toggleItalic();
+    });
+
+    centerBtn?.addEventListener('click', async () => {
+      const doc = this.getActiveDocument();
+      if (!doc) return;
+      const block = this.textEditOverlay.getSelectedBlock();
+      if (!block) return;
+      const page = await doc.pdfDocProxy.getPage(block.pageIndex + 1);
+      const vp = page.getViewport({ scale: 1.0 });
+      this.textEditOverlay.alignCenter(vp.width);
+    });
+
+    duplicateBtn?.addEventListener('click', () => {
+      this.textEditOverlay.duplicateSelected();
+    });
+
     if (colorInput) {
       colorInput.addEventListener('input', () => {
         this.textEditOverlay.applyColor(colorInput.value);
+      });
+    }
+
+    if (bgColorInput) {
+      bgColorInput.addEventListener('input', () => {
+        this.textEditOverlay.applyBgColor(bgColorInput.value);
       });
     }
 
@@ -2811,37 +3759,41 @@ class SlashPDFApp {
     }
 
     this.textEditOverlay.setOnSelectionChange((block) => {
-      if (block) {
-        if (fontSelect) {
-          fontSelect.disabled = false;
+      const hasBlock = !!block;
+      if (fontSelect) {
+        fontSelect.disabled = !hasBlock;
+        if (block) {
           const match = FONT_OPTIONS.find(
-            (f) => f.cssFamily === block.fontFamily || f.label === block.fontFamily || f.pdfFont === block.pdfFont
+            (f) => f.cssFamily === block.fontFamily || f.label === block.fontFamily || f.baseFont === block.baseFont
           );
           if (match) fontSelect.value = match.label;
-        }
-        if (sizeSelect) {
-          sizeSelect.disabled = false;
-          sizeSelect.value = String(block.fontSize);
-        }
-        if (colorInput) {
-          colorInput.disabled = false;
-          colorInput.value = block.color || '#000000';
-        }
-        if (deleteBtn) deleteBtn.disabled = false;
-      } else {
-        if (fontSelect) {
-          fontSelect.disabled = true;
+        } else {
           fontSelect.value = '';
         }
-        if (sizeSelect) {
-          sizeSelect.disabled = true;
-          sizeSelect.value = '';
-        }
-        if (colorInput) {
-          colorInput.disabled = true;
-        }
-        if (deleteBtn) deleteBtn.disabled = true;
       }
+      if (sizeSelect) {
+        sizeSelect.disabled = !hasBlock;
+        sizeSelect.value = block ? String(block.fontSize) : '';
+      }
+      if (boldBtn) {
+        boldBtn.disabled = !hasBlock;
+        boldBtn.classList.toggle('active', !!block?.isBold);
+      }
+      if (italicBtn) {
+        italicBtn.disabled = !hasBlock;
+        italicBtn.classList.toggle('active', !!block?.isItalic);
+      }
+      if (colorInput) {
+        colorInput.disabled = !hasBlock;
+        if (block) colorInput.value = block.color || '#000000';
+      }
+      if (bgColorInput) {
+        bgColorInput.disabled = !hasBlock;
+        if (block) bgColorInput.value = block.bgColor || '#ffffff';
+      }
+      if (centerBtn) centerBtn.disabled = !hasBlock;
+      if (duplicateBtn) duplicateBtn.disabled = !hasBlock;
+      if (deleteBtn) deleteBtn.disabled = !hasBlock;
     });
 
     this.textEditOverlay.setOnModifiedChange((count) => {
@@ -2882,7 +3834,7 @@ class SlashPDFApp {
     const bar = document.getElementById('textEditModeBar');
     bar?.classList.remove('hidden');
 
-    this.setStatus('Initializing Edit Text Mode (extracting words)...');
+    this.setStatus('Initializing Edit Text Mode (analyzing document structure)...');
 
     // Limit to 10 pages around current page for optimal responsiveness
     const startPage = Math.max(0, Math.min(doc.currentPage - 1, doc.numPages - MAX_EDIT_PAGES));
@@ -2894,9 +3846,10 @@ class SlashPDFApp {
 
       const page = await doc.pdfDocProxy.getPage(pageIdx + 1);
       const vp = page.getViewport({ scale: 1.0 });
+      const canvas = pageWrapper.querySelector('canvas') as HTMLCanvasElement | null;
       let blocks = this.textEditOverlay.getPageBlocks(pageIdx);
       if (!blocks) {
-        blocks = await this.textEditOverlay.extractPageBlocks(doc.pdfDocProxy, pageIdx);
+        blocks = await this.textEditOverlay.extractPageBlocks(doc.pdfDocProxy, pageIdx, canvas);
       }
       this.textEditOverlay.createPageOverlay(pageWrapper, blocks, pageIdx, doc.scale, vp.height);
     }
@@ -2905,7 +3858,7 @@ class SlashPDFApp {
       doc.numPages > MAX_EDIT_PAGES
         ? `pages ${startPage + 1}–${endPage} (10 page limit)`
         : `all ${doc.numPages} pages`;
-    this.setStatus(`Edit Text Mode ready for ${rangeStr}. Click word to select/move, double-click to edit.`);
+    this.setStatus(`Edit Text Mode ready for ${rangeStr}. Click text line to select/move, double-click to edit.`);
     this.showToast(`Edit Text Mode active (${rangeStr})`, 'info');
   }
 
@@ -2934,9 +3887,10 @@ class SlashPDFApp {
       if (!pageWrapper) continue;
       const page = await doc.pdfDocProxy.getPage(pageIdx + 1);
       const vp = page.getViewport({ scale: 1.0 });
+      const canvas = pageWrapper.querySelector('canvas') as HTMLCanvasElement | null;
       let blocks = this.textEditOverlay.getPageBlocks(pageIdx);
       if (!blocks) {
-        blocks = await this.textEditOverlay.extractPageBlocks(doc.pdfDocProxy, pageIdx);
+        blocks = await this.textEditOverlay.extractPageBlocks(doc.pdfDocProxy, pageIdx, canvas);
       }
       this.textEditOverlay.createPageOverlay(pageWrapper, blocks, pageIdx, doc.scale, vp.height);
     }
@@ -2969,12 +3923,13 @@ class SlashPDFApp {
       fontSize: b.fontSize,
       pdfFont: b.pdfFont,
       color: b.color,
+      bgColor: b.bgColor,
     }));
 
     try {
       const newBytes = await PDFEditorService.applyTextEdits(doc.fileBytes, edits);
       this.exitTextEditMode();
-      await this.reloadActiveDocBytes(newBytes);
+      await this.reloadActiveDocBytes(newBytes, false, 'Apply text edits');
       this.showToast(`Successfully applied ${modified.length} text changes to PDF!`, 'success');
       this.setStatus('Text changes applied successfully.');
     } catch (err: any) {

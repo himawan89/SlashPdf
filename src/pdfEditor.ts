@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts, PDFTextField, PDFCheckBox, PDFDropdown, PDFName, PDFNumber, PDFRawStream, PDFRef } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, StandardFonts, PDFTextField, PDFCheckBox, PDFDropdown, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFHexString } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFCompressOptions, PDFCompressResult } from './types';
 
@@ -455,9 +455,9 @@ export class PDFEditorService {
           numStr = String(pageNum).padStart(options.batesDigits || 6, '0');
         }
         return template
-          .replace('{page}', numStr)
-          .replace('{total}', String(total))
-          .replace('{prefix}', options.prefix || '');
+          .replace(/\{page\}/g, numStr)
+          .replace(/\{total\}/g, String(total))
+          .replace(/\{prefix\}/g, options.prefix || '');
       };
 
       const topY = height - 25;
@@ -593,6 +593,7 @@ export class PDFEditorService {
     height?: number,
     options: {
       preset?: 'center' | 'top-center' | 'bottom-center' | 'custom';
+      rotation?: number;
     } = {}
   ): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.load(pdfBytes);
@@ -630,7 +631,27 @@ export class PDFEditorService {
       }
     }
 
-    page.drawImage(img, { x: drawX, y: drawY, width: imgWidth, height: imgHeight });
+    const rotDeg = options.rotation ? ((options.rotation % 360) + 360) % 360 : 0;
+    if (rotDeg !== 0) {
+      // Rotate around the center of the image
+      const thetaPdf = (360 - (rotDeg % 360)) % 360;
+      const thetaRad = (thetaPdf * Math.PI) / 180;
+      const cx = drawX + imgWidth / 2;
+      const cy = drawY + imgHeight / 2;
+      const rotatedDrawX = cx - (imgWidth / 2) * Math.cos(thetaRad) + (imgHeight / 2) * Math.sin(thetaRad);
+      const rotatedDrawY = cy - (imgWidth / 2) * Math.sin(thetaRad) - (imgHeight / 2) * Math.cos(thetaRad);
+
+      page.drawImage(img, {
+        x: rotatedDrawX,
+        y: rotatedDrawY,
+        width: imgWidth,
+        height: imgHeight,
+        rotate: degrees(thetaPdf),
+      });
+    } else {
+      page.drawImage(img, { x: drawX, y: drawY, width: imgWidth, height: imgHeight });
+    }
+
     return await pdfDoc.save();
   }
 
@@ -703,8 +724,22 @@ export class PDFEditorService {
       color: rgb(0.14, 0.38, 0.92),
     });
 
+    // Helper: ensure page has a direct Annots array and push a new annotation ref
+    const pushAnnotation = (annotRef: PDFRef) => {
+      const annotsRaw = page.node.lookup(PDFName.of('Annots'));
+      if (annotsRaw && typeof (annotsRaw as any).push === 'function') {
+        (annotsRaw as any).push(annotRef);
+      } else {
+        const arr = pdfDoc.context.obj([annotRef]);
+        page.node.set(PDFName.of('Annots'), arr);
+      }
+    };
+
     // Register PDF link annotation
     if (options.url) {
+      const formattedUrl = options.url.startsWith('http://') || options.url.startsWith('https://') || options.url.startsWith('mailto:')
+        ? options.url
+        : `https://${options.url}`;
       const linkAnnot = pdfDoc.context.obj({
         Type: 'Annot',
         Subtype: 'Link',
@@ -714,16 +749,11 @@ export class PDFEditorService {
         A: {
           Type: 'Action',
           S: 'URI',
-          URI: options.url.startsWith('http') ? options.url : `https://${options.url}`,
+          URI: formattedUrl,
         },
       });
       const linkAnnotRef = pdfDoc.context.register(linkAnnot);
-      let annots = page.node.lookup(PDFName.of('Annots')) as any;
-      if (!annots) {
-        annots = pdfDoc.context.obj([]);
-        page.node.set(PDFName.of('Annots'), annots);
-      }
-      annots.push(linkAnnotRef);
+      pushAnnotation(linkAnnotRef);
     } else if (options.targetPage && pages[options.targetPage - 1]) {
       const targetPageObj = pages[options.targetPage - 1];
       const linkAnnot = pdfDoc.context.obj({
@@ -731,15 +761,11 @@ export class PDFEditorService {
         Subtype: 'Link',
         Rect: [drawX, drawY - 2, drawX + textWidth, drawY + textHeight],
         Border: [0, 0, 0],
+        C: [0.14, 0.38, 0.92],
         Dest: [targetPageObj.ref, PDFName.of('Fit')],
       });
       const linkAnnotRef = pdfDoc.context.register(linkAnnot);
-      let annots = page.node.lookup(PDFName.of('Annots')) as any;
-      if (!annots) {
-        annots = pdfDoc.context.obj([]);
-        page.node.set(PDFName.of('Annots'), annots);
-      }
-      annots.push(linkAnnotRef);
+      pushAnnotation(linkAnnotRef);
     }
 
     return await pdfDoc.save();
@@ -768,24 +794,58 @@ export class PDFEditorService {
       fontSize: number;
       pdfFont: string;
       color: string;
+      bgColor?: string;
     }>
   ): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.load(pdfBytes);
     const pages = pdfDoc.getPages();
 
+    // Map common font aliases to exact StandardFonts identifiers
+    const fontNameMap: Record<string, string> = {
+      helvetica: StandardFonts.Helvetica,
+      'helvetica-bold': StandardFonts.HelveticaBold,
+      helveticabold: StandardFonts.HelveticaBold,
+      'helvetica-oblique': StandardFonts.HelveticaOblique,
+      helveticaoblique: StandardFonts.HelveticaOblique,
+      'helvetica-boldoblique': StandardFonts.HelveticaBoldOblique,
+      helveticaboldoblique: StandardFonts.HelveticaBoldOblique,
+      'times-roman': StandardFonts.TimesRoman,
+      timesroman: StandardFonts.TimesRoman,
+      'times-bold': StandardFonts.TimesRomanBold,
+      timesromanbold: StandardFonts.TimesRomanBold,
+      timesbold: StandardFonts.TimesRomanBold,
+      'times-italic': StandardFonts.TimesRomanItalic,
+      timesromanitalic: StandardFonts.TimesRomanItalic,
+      timesitalic: StandardFonts.TimesRomanItalic,
+      'times-bolditalic': StandardFonts.TimesRomanBoldItalic,
+      timesromanbolditalic: StandardFonts.TimesRomanBoldItalic,
+      courier: StandardFonts.Courier,
+      'courier-bold': StandardFonts.CourierBold,
+      courierbold: StandardFonts.CourierBold,
+      'courier-oblique': StandardFonts.CourierOblique,
+      courieroblique: StandardFonts.CourierOblique,
+      'courier-boldoblique': StandardFonts.CourierBoldOblique,
+      courierboldoblique: StandardFonts.CourierBoldOblique,
+    };
+
     // Cache embedded fonts to avoid re-embedding the same font multiple times
     const fontCache = new Map<string, any>();
     const getFont = async (fontName: string) => {
-      if (!fontCache.has(fontName)) {
+      const cleanKey = (fontName || '').toLowerCase().trim();
+      const standardName = fontNameMap[cleanKey] || fontNameMap[cleanKey.replace(/\s+/g, '-')] || fontName || StandardFonts.Helvetica;
+
+      if (!fontCache.has(standardName)) {
         try {
-          fontCache.set(fontName, await pdfDoc.embedFont(fontName as any));
-        } catch {
-          // Fallback to Helvetica if unknown font name
-          if (!fontCache.has('Helvetica')) fontCache.set('Helvetica', await pdfDoc.embedFont('Helvetica' as any));
-          fontCache.set(fontName, fontCache.get('Helvetica'));
+          fontCache.set(standardName, await pdfDoc.embedFont(standardName as any));
+        } catch (e) {
+          console.warn(`Could not embed font "${standardName}", falling back to Helvetica:`, e);
+          if (!fontCache.has(StandardFonts.Helvetica)) {
+            fontCache.set(StandardFonts.Helvetica, await pdfDoc.embedFont(StandardFonts.Helvetica));
+          }
+          fontCache.set(standardName, fontCache.get(StandardFonts.Helvetica));
         }
       }
-      return fontCache.get(fontName)!;
+      return fontCache.get(standardName)!;
     };
 
     // Group edits by page
@@ -802,19 +862,39 @@ export class PDFEditorService {
       for (const edit of pageEdits) {
         // White-out original position (skip for brand-new blocks)
         if (!edit.isNew) {
-          const margin = 1;
+          // Generous margins: covers baseline descent (p, g, y, q, j), ascent, and horizontal overhangs
+          const descentPad = Math.max(4, edit.fontSize * 0.38);
+          const ascentPad = Math.max(4, edit.fontSize * 0.28);
+          const hPad = Math.max(3, edit.fontSize * 0.15);
+
+          const rX = Math.max(0, edit.origX - hPad);
+          const rY = Math.max(0, edit.origY - descentPad);
+          const rW = edit.origWidth + hPad * 2;
+          const rH = edit.origHeight + descentPad + ascentPad;
+
+          let rBg = 1, gBg = 1, bBg = 1;
+          if (edit.bgColor && edit.bgColor.startsWith('#') && edit.bgColor.length === 7) {
+            rBg = parseInt(edit.bgColor.slice(1, 3), 16) / 255;
+            gBg = parseInt(edit.bgColor.slice(3, 5), 16) / 255;
+            bBg = parseInt(edit.bgColor.slice(5, 7), 16) / 255;
+          }
+
           page.drawRectangle({
-            x: edit.origX - margin,
-            y: edit.origY - margin,
-            width: edit.origWidth + margin * 2 + 2,
-            height: edit.origHeight + margin * 2,
-            color: rgb(1, 1, 1),
+            x: rX,
+            y: rY,
+            width: rW,
+            height: rH,
+            color: rgb(
+              Math.min(1, Math.max(0, isNaN(rBg) ? 1 : rBg)),
+              Math.min(1, Math.max(0, isNaN(gBg) ? 1 : gBg)),
+              Math.min(1, Math.max(0, isNaN(bBg) ? 1 : bBg))
+            ),
             opacity: 1,
           });
         }
 
         // Draw new text (skip if deleted or empty)
-        if (!edit.isDeleted && edit.str.trim()) {
+        if (!edit.isDeleted && edit.str && edit.str.trim()) {
           const font = await getFont(edit.pdfFont);
           const hexColor = edit.color || '#000000';
           const r = parseInt(hexColor.slice(1, 3), 16) / 255;
@@ -827,9 +907,9 @@ export class PDFEditorService {
             size: Math.max(4, edit.fontSize),
             font,
             color: rgb(
-              Math.min(1, Math.max(0, r)),
-              Math.min(1, Math.max(0, g)),
-              Math.min(1, Math.max(0, b))
+              Math.min(1, Math.max(0, isNaN(r) ? 0 : r)),
+              Math.min(1, Math.max(0, isNaN(g) ? 0 : g)),
+              Math.min(1, Math.max(0, isNaN(b) ? 0 : b))
             ),
           });
         }
@@ -1297,5 +1377,65 @@ export class PDFEditorService {
       imagesCompressed,
       isTargetMet,
     };
+  }
+
+  /**
+   * Embed or update outlines / bookmarks directly in the PDF document bytes
+   */
+  static async embedBookmarks(
+    pdfBytes: Uint8Array,
+    bookmarks: Array<{ title: string; pageIndex: number }>
+  ): Promise<Uint8Array> {
+    try {
+      const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+      const pages = pdfDoc.getPages();
+      const pageCount = pages.length;
+
+      // Filter valid bookmarks
+      const validBookmarks = bookmarks.filter(
+        (b) => typeof b.pageIndex === 'number' && b.pageIndex >= 0 && b.pageIndex < pageCount && b.title?.trim()
+      );
+
+      if (validBookmarks.length === 0) {
+        pdfDoc.catalog.delete(PDFName.of('Outlines'));
+        return await pdfDoc.save();
+      }
+
+      // Create indirect references for all items and root
+      const outlineRootRef = pdfDoc.context.nextRef();
+      const itemRefs: PDFRef[] = validBookmarks.map(() => pdfDoc.context.nextRef());
+
+      validBookmarks.forEach((bm, i) => {
+        const itemRef = itemRefs[i];
+        const page = pages[bm.pageIndex];
+        const itemDict: Record<string, any> = {
+          Title: PDFHexString.fromText(bm.title.trim()),
+          Parent: outlineRootRef,
+          Dest: [page.ref, PDFName.of('Fit')],
+        };
+        if (i > 0) {
+          itemDict.Prev = itemRefs[i - 1];
+        }
+        if (i < validBookmarks.length - 1) {
+          itemDict.Next = itemRefs[i + 1];
+        }
+        pdfDoc.context.assign(itemRef, pdfDoc.context.obj(itemDict));
+      });
+
+      const rootDict = pdfDoc.context.obj({
+        Type: PDFName.of('Outlines'),
+        First: itemRefs[0],
+        Last: itemRefs[itemRefs.length - 1],
+        Count: PDFNumber.of(validBookmarks.length),
+      });
+
+      pdfDoc.context.assign(outlineRootRef, rootDict);
+      pdfDoc.catalog.set(PDFName.of('Outlines'), outlineRootRef);
+
+      return await pdfDoc.save();
+    } catch (err) {
+      console.warn('Failed to embed bookmarks into PDF bytes:', err);
+      return pdfBytes;
+    }
   }
 }
