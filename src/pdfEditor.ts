@@ -1,4 +1,4 @@
-import { PDFDocument, rgb, degrees, StandardFonts, PDFTextField, PDFCheckBox, PDFDropdown, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFHexString } from 'pdf-lib';
+import { PDFDocument, rgb, degrees, StandardFonts, PDFTextField, PDFCheckBox, PDFDropdown, PDFRadioGroup, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFHexString } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFCompressOptions, PDFCompressResult } from './types';
 
@@ -994,36 +994,118 @@ export class PDFEditorService {
     pdfBytes: Uint8Array,
     pageIndex: number,
     field: {
-      type: 'text' | 'checkbox' | 'dropdown';
+      type: 'text' | 'checkbox' | 'dropdown' | 'radio' | 'signature';
       name: string;
-      x: number;
-      y: number;
-      width: number;
-      height: number;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      positionPreset?: 'center' | 'top' | 'bottom' | 'custom';
       options?: string[];
       defaultValue?: string;
+      multiline?: boolean;
     }
   ): Promise<Uint8Array> {
     const pdfDoc = await PDFDocument.load(pdfBytes);
     const form = pdfDoc.getForm();
     const pages = pdfDoc.getPages();
-    const page = pages[pageIndex];
+    const page = pages[Math.max(0, Math.min(pageIndex, pages.length - 1))];
+    const { width: pWidth, height: pHeight } = page.getSize();
+
+    // Default sizes per field type
+    const width = field.width ?? (
+      field.type === 'checkbox' ? 20 :
+      field.type === 'radio' ? 18 :
+      field.type === 'signature' ? 220 : 200
+    );
+    const height = field.height ?? (
+      field.type === 'checkbox' ? 20 :
+      field.type === 'radio' ? 18 :
+      field.type === 'signature' ? 50 : 28
+    );
+
+    // Calculate (x, y) based on presets or provided coordinates
+    let x = field.x;
+    let y = field.y;
+
+    if (x === undefined || y === undefined || field.positionPreset === 'center') {
+      x = Math.max(20, Math.round((pWidth - width) / 2));
+      y = Math.max(20, Math.round((pHeight - height) / 2));
+    } else if (field.positionPreset === 'top') {
+      x = Math.max(20, Math.round((pWidth - width) / 2));
+      y = Math.max(20, pHeight - height - 60);
+    } else if (field.positionPreset === 'bottom') {
+      x = Math.max(20, Math.round((pWidth - width) / 2));
+      y = 60;
+    }
+
+    // Ensure within page bounds
+    x = Math.max(0, Math.min(x, pWidth - width));
+    y = Math.max(0, Math.min(y, pHeight - height));
 
     if (field.type === 'text') {
       const tf: PDFTextField = form.createTextField(field.name);
+      if (field.multiline) {
+        tf.enableMultiline();
+      }
       tf.setText(field.defaultValue || '');
-      tf.addToPage(page, { x: field.x, y: field.y, width: field.width, height: field.height });
+      tf.addToPage(page, { x, y, width, height });
     } else if (field.type === 'checkbox') {
       const cb: PDFCheckBox = form.createCheckBox(field.name);
       if (field.defaultValue === 'true') cb.check();
-      cb.addToPage(page, { x: field.x, y: field.y, width: field.width, height: field.height });
+      cb.addToPage(page, { x, y, width, height });
     } else if (field.type === 'dropdown') {
       const dd: PDFDropdown = form.createDropdown(field.name);
-      if (field.options && field.options.length) {
-        dd.setOptions(field.options);
-        if (field.defaultValue) dd.select(field.defaultValue);
+      const opts = field.options && field.options.length ? field.options : ['Option 1', 'Option 2', 'Option 3'];
+      dd.setOptions(opts);
+      if (field.defaultValue && opts.includes(field.defaultValue)) {
+        dd.select(field.defaultValue);
+      } else if (opts.length > 0) {
+        dd.select(opts[0]);
       }
-      dd.addToPage(page, { x: field.x, y: field.y, width: field.width, height: field.height });
+      dd.addToPage(page, { x, y, width, height });
+    } else if (field.type === 'radio') {
+      const group = form.createRadioGroup(field.name);
+      const radioOptions = field.options && field.options.length ? field.options : ['Option 1', 'Option 2', 'Option 3'];
+      radioOptions.forEach((optLabel, idx) => {
+        const optY = y - idx * (height + 8);
+        if (optY >= 10) {
+          group.addOptionToPage(optLabel, page, {
+            x,
+            y: optY,
+            width,
+            height,
+          });
+        }
+      });
+      if (field.defaultValue && radioOptions.includes(field.defaultValue)) {
+        group.select(field.defaultValue);
+      } else if (radioOptions.length > 0) {
+        group.select(radioOptions[0]);
+      }
+    } else if (field.type === 'signature') {
+      const tf: PDFTextField = form.createTextField(field.name);
+      tf.setText(field.defaultValue || '');
+      tf.addToPage(page, { x, y, width, height });
+
+      try {
+        page.drawLine({
+          start: { x: x + 8, y: y + 14 },
+          end: { x: x + width - 8, y: y + 14 },
+          thickness: 1,
+          color: rgb(0.5, 0.5, 0.5),
+        });
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        page.drawText('✕ Signature', {
+          x: x + 10,
+          y: y + 4,
+          size: 8,
+          font,
+          color: rgb(0.5, 0.5, 0.5),
+        });
+      } catch {
+        // Continue even if font or decorative line fails
+      }
     }
 
     return await pdfDoc.save();
@@ -1090,6 +1172,104 @@ export class PDFEditorService {
         }
       } catch {
         // Field might not exist
+      }
+    });
+
+    return await pdfDoc.save();
+  }
+
+  /**
+   * Reset all form field values to empty/unchecked defaults
+   */
+  static async resetForm(pdfBytes: Uint8Array): Promise<Uint8Array> {
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const form = pdfDoc.getForm();
+    const fields = form.getFields();
+
+    fields.forEach((f) => {
+      try {
+        if (f instanceof PDFTextField) {
+          f.setText('');
+        } else if (f instanceof PDFCheckBox) {
+          f.uncheck();
+        } else if (f instanceof PDFDropdown) {
+          // Reset dropdown to first option or clear
+          const options = f.getOptions();
+          if (options.length > 0) {
+            f.select(options[0]);
+          }
+        } else if (f instanceof PDFRadioGroup) {
+          // Clear radio selection if possible
+          try { f.clear(); } catch { /* some radio groups may not support clear */ }
+        }
+      } catch {
+        // Skip fields that can't be reset
+      }
+    });
+
+    return await pdfDoc.save();
+  }
+
+  /**
+   * Get summary of form fields in the document (for Fill Form dialog)
+   */
+  static async getFormFieldsSummary(pdfBytes: Uint8Array): Promise<Array<{
+    name: string;
+    type: string;
+    value: string;
+    options?: string[];
+  }>> {
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const form = pdfDoc.getForm();
+    const fields = form.getFields();
+    const result: Array<{ name: string; type: string; value: string; options?: string[] }> = [];
+
+    fields.forEach((f) => {
+      try {
+        const name = f.getName();
+        if (f instanceof PDFTextField) {
+          result.push({ name, type: 'text', value: f.getText() || '' });
+        } else if (f instanceof PDFCheckBox) {
+          result.push({ name, type: 'checkbox', value: f.isChecked() ? 'true' : 'false' });
+        } else if (f instanceof PDFDropdown) {
+          const options = f.getOptions();
+          const selected = f.getSelected();
+          result.push({ name, type: 'dropdown', value: selected.length > 0 ? selected[0] : '', options });
+        } else if (f instanceof PDFRadioGroup) {
+          const options = f.getOptions();
+          const selected = f.getSelected();
+          result.push({ name, type: 'radio', value: selected || '', options });
+        }
+      } catch {
+        // Skip unreadable fields
+      }
+    });
+
+    return result;
+  }
+
+  /**
+   * Fill form fields with provided data
+   */
+  static async fillForm(pdfBytes: Uint8Array, data: Record<string, any>): Promise<Uint8Array> {
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const form = pdfDoc.getForm();
+
+    Object.entries(data).forEach(([fieldName, value]) => {
+      try {
+        const field = form.getField(fieldName);
+        if (field instanceof PDFTextField && typeof value === 'string') {
+          field.setText(value);
+        } else if (field instanceof PDFCheckBox) {
+          if (value === true || value === 'true') field.check();
+          else field.uncheck();
+        } else if (field instanceof PDFDropdown && typeof value === 'string') {
+          field.select(value);
+        } else if (field instanceof PDFRadioGroup && typeof value === 'string') {
+          field.select(value);
+        }
+      } catch {
+        // Field might not exist or can't be set
       }
     });
 

@@ -1813,6 +1813,8 @@ html, body {
   caret-color: #1e293b;
   z-index: 2;
   pointer-events: auto;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 .textLayer :is(span, br),
@@ -1822,8 +1824,9 @@ html, body {
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
-  -webkit-user-select: text;
-  user-select: text;
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  pointer-events: auto !important;
 }
 
 .textLayer,

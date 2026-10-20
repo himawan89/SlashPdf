@@ -92,7 +92,16 @@ export class UIDialogs {
       const cancelBtn = this.container.querySelector('[data-dialog-action="cancel"]');
       const confirmBtn = this.container.querySelector('[data-dialog-action="confirm"]');
 
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          cleanup(false);
+        }
+      };
+      window.addEventListener('keydown', onKeyDown);
+
       const cleanup = (result: boolean) => {
+        window.removeEventListener('keydown', onKeyDown);
         this.overlay.classList.add('hidden');
         resolve(result);
         // Delay clearing container so callers can read form inputs synchronously
@@ -151,6 +160,92 @@ export class UIDialogs {
       </div>
     `;
     return await this.show(html);
+  }
+
+  /**
+   * Professional confirmation dialog for Clear All
+   */
+  static async promptConfirmClearReview(stats: {
+    annotationsCount: number;
+    commentsCount: number;
+    hasHistory: boolean;
+  }): Promise<{ action: 'clear-annotations' | 'revert-original' } | null> {
+    const totalItems = stats.annotationsCount + stats.commentsCount;
+    const html = `
+      <div class="dialog-modal" style="max-width: 480px;">
+        <div class="dialog-header">
+          <h3>
+            <span class="material-symbols-rounded" style="color: var(--danger, #ef4444); font-size: 22px;">delete_sweep</span>
+            Clear All Review Edits
+          </h3>
+          <button class="dialog-close-btn" title="Close"><span class="material-symbols-rounded">close</span></button>
+        </div>
+        <div class="dialog-body" style="display:flex; flex-direction:column; gap:14px;">
+          <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 12px; display: flex; gap: 10px; align-items: flex-start;">
+            <span class="material-symbols-rounded" style="color: var(--danger, #ef4444); font-size: 22px; flex-shrink:0; margin-top:1px;">warning</span>
+            <div style="font-size: 13px; line-height: 1.45; color: var(--text-main, #1e293b);">
+              <strong>Are you sure you want to clear these edits?</strong>
+              <div style="margin-top: 4px; color: var(--text-secondary, #64748b);">
+                This operation will remove <strong>${totalItems} item${totalItems === 1 ? '' : 's'}</strong> (${stats.annotationsCount} markup${stats.annotationsCount === 1 ? '' : 's'}/shape${stats.annotationsCount === 1 ? '' : 's'} and ${stats.commentsCount} note${stats.commentsCount === 1 ? '' : 's'}) across all pages.
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin:0;">
+            <label style="font-weight:600; margin-bottom:8px; display:block; font-size:12.5px;">Choose Action Scope:</label>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:13px; padding:10px 12px; border:1px solid var(--border-color, #e2e8f0); border-radius:8px; background:var(--bg-main, #ffffff);">
+                <input type="radio" name="clearScope" value="clear-annotations" checked style="margin-top:3px;" />
+                <div>
+                  <strong>Clear Review Markups & Notes</strong>
+                  <div style="font-size:11.5px; color:var(--text-secondary, #64748b); margin-top:2px;">
+                    Removes all drawings, notes, shapes, highlights, stamps, and comments. Original PDF text and pages remain intact.
+                  </div>
+                </div>
+              </label>
+
+              ${stats.hasHistory ? `
+              <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer; font-size:13px; padding:10px 12px; border:1px solid var(--border-color, #e2e8f0); border-radius:8px; background:var(--bg-main, #ffffff);">
+                <input type="radio" name="clearScope" value="revert-original" style="margin-top:3px;" />
+                <div>
+                  <strong>Revert Entire Document to Original</strong>
+                  <div style="font-size:11.5px; color:var(--text-secondary, #64748b); margin-top:2px;">
+                    Discards all unsaved edits, added content, and annotations, restoring the document to its original opened state.
+                  </div>
+                </div>
+              </label>
+              ` : ''}
+            </div>
+          </div>
+
+          <div style="font-size: 11.5px; color: var(--text-secondary, #64748b); display: flex; align-items: center; gap: 6px; padding: 4px 2px;">
+            <span class="material-symbols-rounded" style="font-size: 16px; color: var(--primary, #3b82f6);">info</span>
+            <span>You can easily undo this action at any time using <strong>Ctrl+Z</strong>.</span>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
+          <button class="dialog-btn danger" data-dialog-action="confirm">
+            <span class="material-symbols-rounded" style="font-size: 18px;">delete_sweep</span> Clear All
+          </button>
+        </div>
+      </div>
+    `;
+
+    let chosenAction: 'clear-annotations' | 'revert-original' = 'clear-annotations';
+
+    const ok = await this.show(html, () => {
+      const checked = (document.querySelector('input[name="clearScope"]:checked') as HTMLInputElement)?.value;
+      if (checked === 'revert-original' || checked === 'clear-annotations') {
+        chosenAction = checked;
+      }
+      return true;
+    });
+
+    if (ok) {
+      return { action: chosenAction };
+    }
+    return null;
   }
 
   /**
@@ -955,64 +1050,221 @@ export class UIDialogs {
   /**
    * Stamp Selector Dialog
    */
-  static async promptStamp(): Promise<{ text: string; color: string } | null> {
-    const stamps = [
-      { text: 'APPROVED', color: '#16a34a' },
-      { text: 'CONFIDENTIAL', color: '#dc2626' },
-      { text: 'DRAFT', color: '#d97706' },
-      { text: 'FINAL', color: '#2563eb' },
-      { text: 'REJECTED', color: '#dc2626' },
-      { text: 'REVIEWED', color: '#9333ea' },
+  static promptStamp(): Promise<{
+    text: string;
+    color: string;
+    lines: string[];
+  } | null> {
+    const stampPresets = [
+      { label: 'APPROVED', color: '#16a34a' },
+      { label: 'CONFIDENTIAL', color: '#dc2626' },
+      { label: 'DRAFT', color: '#d97706' },
+      { label: 'FINAL', color: '#2563eb' },
+      { label: 'REJECTED', color: '#dc2626' },
+      { label: 'REVIEWED', color: '#9333ea' },
     ];
 
-    const stampOptionsHtml = stamps
+    const presetBtns = stampPresets
       .map(
-        (s, idx) => `
-        <label style="display:flex; align-items:center; gap:10px; padding:8px 12px; border:1px solid var(--border-subtle); border-radius:6px; cursor:pointer;">
-          <input type="radio" name="stampRadio" value="${idx}" ${idx === 0 ? 'checked' : ''} />
-          <span style="font-weight:700; color:${s.color}; font-size:13px;">${s.text}</span>
-        </label>
+        (s) => `
+        <button type="button" class="stamp-preset-btn" data-label="${s.label}" data-color="${s.color}"
+          style="font-weight:800; color:${s.color}; border:2px solid ${s.color}; background:transparent;
+                 border-radius:6px; padding:6px 14px; cursor:pointer; font-size:12px; letter-spacing:1px;">
+          ${s.label}
+        </button>
       `
       )
       .join('');
 
+    const today = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+
     const html = `
-      <div class="dialog-modal">
+      <div class="dialog-modal" style="max-width:480px;">
         <div class="dialog-header">
-          <h3><span class="material-symbols-rounded">approval</span> Select Document Stamp</h3>
+          <h3><span class="material-symbols-rounded">approval</span> Stamp Editor</h3>
           <button class="dialog-close-btn" title="Close"><span class="material-symbols-rounded">close</span></button>
         </div>
-        <div class="dialog-body">
-          <div style="display:flex; flex-direction:column; gap:8px;">
-            ${stampOptionsHtml}
+        <div class="dialog-body" style="display:flex; flex-direction:column; gap:14px;">
+          <div>
+            <label style="font-size:11px; color:var(--text-light); margin-bottom:6px; display:block;">Quick Presets</label>
+            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+              ${presetBtns}
+            </div>
           </div>
-          <div class="form-group" style="margin-top:8px;">
-            <label>Or Custom Stamp Text</label>
-            <input type="text" id="stampCustomText" placeholder="e.g. PAID, COPY, VERIFIED" />
+          <div style="border-top:1px solid var(--border-subtle); padding-top:14px;">
+            <label style="font-size:11px; color:var(--text-light); margin-bottom:8px; display:block;">
+              Stamp Lines — <span style="font-style:italic;">customize each row</span>
+            </label>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+              <div class="form-group" style="margin:0;">
+                <label>Line 1 — Status / Header</label>
+                <input type="text" id="stampLine1" value="APPROVED" placeholder="e.g. APPROVED" style="font-weight:700; letter-spacing:1px;" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label>Line 2 — Name</label>
+                <input type="text" id="stampLine2" placeholder="e.g. Budi Santoso" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label>Line 3 — Title / Position</label>
+                <input type="text" id="stampLine3" placeholder="e.g. Manager Keuangan" />
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label>Line 4 — Date</label>
+                <input type="text" id="stampLine4" value="${today}" placeholder="e.g. 20 Oktober 2026" />
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; gap:16px; align-items:flex-end; border-top:1px solid var(--border-subtle); padding-top:14px;">
+            <div class="form-group" style="margin:0; flex:1;">
+              <label>Stamp Color</label>
+              <input type="color" id="stampColor" value="#dc2626" style="height:36px; padding:2px 4px; cursor:pointer;" />
+            </div>
+            <div style="flex:2;">
+              <label style="font-size:11px; color:var(--text-light); display:block; margin-bottom:4px;">Preview</label>
+              <div id="stampPreview" style="border:2.5px solid #dc2626; border-radius:4px; padding:8px 16px;
+                   font-family:sans-serif; text-align:center; background:transparent; min-height:64px;
+                   display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;">
+                <span id="pvLine1" style="font-weight:900; font-size:18px; color:#dc2626; letter-spacing:2px;">APPROVED</span>
+                <span id="pvLine2" style="font-size:11px; color:#dc2626;"></span>
+                <span id="pvLine3" style="font-size:11px; color:#dc2626;"></span>
+                <span id="pvLine4" style="font-size:11px; color:#dc2626;">${today}</span>
+              </div>
+            </div>
           </div>
         </div>
         <div class="dialog-footer">
           <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
-          <button class="dialog-btn primary" data-dialog-action="confirm">Use Stamp</button>
+          <button class="dialog-btn primary" data-dialog-action="confirm">
+            <span class="material-symbols-rounded">add</span> Place Stamp
+          </button>
         </div>
       </div>
     `;
 
-    const confirmed = await this.show(html);
-    if (!confirmed) return null;
+    return new Promise((resolve) => {
+      this.container.innerHTML = html;
+      this.overlay.classList.remove('hidden');
 
-    const customText = (document.getElementById('stampCustomText') as HTMLInputElement).value;
-    if (customText && customText.trim()) {
-      return { text: customText.trim().toUpperCase(), color: '#dc2626' };
-    }
+      // Wire up live preview
+      const colorInput = document.getElementById('stampColor') as HTMLInputElement;
+      const inputs = [1, 2, 3, 4].map((n) => document.getElementById(`stampLine${n}`) as HTMLInputElement);
+      const pvSpans = [1, 2, 3, 4].map((n) => document.getElementById(`pvLine${n}`));
+      const previewEl = document.getElementById('stampPreview');
 
-    const selectedRadio = document.querySelector('input[name="stampRadio"]:checked') as HTMLInputElement;
-    const idx = parseInt(selectedRadio?.value || '0', 10);
-    return stamps[idx];
+      const updatePreview = () => {
+        const color = colorInput?.value || '#dc2626';
+        pvSpans.forEach((sp, i) => {
+          if (sp) { sp.textContent = inputs[i]?.value || ''; sp.style.color = color; }
+        });
+        if (previewEl) previewEl.style.borderColor = color;
+      };
+
+      inputs.forEach((inp) => inp?.addEventListener('input', updatePreview));
+      colorInput?.addEventListener('input', updatePreview);
+
+      document.querySelectorAll<HTMLButtonElement>('.stamp-preset-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const label = btn.dataset.label || '';
+          const color = btn.dataset.color || '#dc2626';
+          if (inputs[0]) inputs[0].value = label;
+          if (colorInput) colorInput.value = color;
+          updatePreview();
+        });
+      });
+
+      const cleanup = (ok: boolean) => {
+        this.overlay.classList.add('hidden');
+        if (!ok) {
+          setTimeout(() => { if (this.overlay.classList.contains('hidden')) this.container.innerHTML = ''; }, 150);
+          resolve(null);
+          return;
+        }
+        const lines = inputs.map((inp) => (inp?.value || '').trim()).filter(Boolean);
+        const color = colorInput?.value || '#dc2626';
+        setTimeout(() => { if (this.overlay.classList.contains('hidden')) this.container.innerHTML = ''; }, 150);
+        resolve({ text: lines.join('\n'), color, lines });
+      };
+
+      this.container.querySelector('.dialog-close-btn')?.addEventListener('click', () => cleanup(false));
+      this.container.querySelector('[data-dialog-action="cancel"]')?.addEventListener('click', () => cleanup(false));
+      this.container.querySelector('[data-dialog-action="confirm"]')?.addEventListener('click', () => cleanup(true));
+      this.overlay.onclick = (e) => { if (e.target === this.overlay) cleanup(false); };
+    });
+  }
+
+
+  /**
+   * Note Text Input Dialog (for sticky notes and comments)
+   */
+  static promptNoteText(title: string, placeholder = 'Type your note here...', initialValue = ''): Promise<string | null> {
+    const html = `
+      <div class="dialog-modal" style="max-width:420px;">
+        <div class="dialog-header">
+          <h3><span class="material-symbols-rounded">sticky_note_2</span> ${title}</h3>
+          <button class="dialog-close-btn" title="Close"><span class="material-symbols-rounded">close</span></button>
+        </div>
+        <div class="dialog-body">
+          <div class="form-group" style="margin:0;">
+            <label>Note Text</label>
+            <textarea id="noteTextInput" rows="4" placeholder="${placeholder}"
+              style="resize:vertical; min-height:80px; font-size:13px; line-height:1.5;">${initialValue}</textarea>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
+          <button class="dialog-btn primary" data-dialog-action="confirm">
+            <span class="material-symbols-rounded">check</span> ${initialValue ? 'Save Note' : 'Add Note'}
+          </button>
+        </div>
+      </div>
+    `;
+
+    return new Promise((resolve) => {
+      this.container.innerHTML = html;
+      this.overlay.classList.remove('hidden');
+
+      const textarea = document.getElementById('noteTextInput') as HTMLTextAreaElement;
+      setTimeout(() => {
+        if (textarea) {
+          textarea.focus();
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+      }, 50);
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          cleanup(false);
+        }
+      };
+      window.addEventListener('keydown', onKeyDown);
+
+      // Allow Ctrl+Enter to confirm
+      textarea?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          cleanup(true);
+        }
+      });
+
+      const cleanup = (ok: boolean) => {
+        window.removeEventListener('keydown', onKeyDown);
+        this.overlay.classList.add('hidden');
+        const value = (document.getElementById('noteTextInput') as HTMLTextAreaElement)?.value?.trim() || '';
+        setTimeout(() => { if (this.overlay.classList.contains('hidden')) this.container.innerHTML = ''; }, 150);
+        resolve(ok && value ? value : null);
+      };
+
+      this.container.querySelector('.dialog-close-btn')?.addEventListener('click', () => cleanup(false));
+      this.container.querySelector('[data-dialog-action="cancel"]')?.addEventListener('click', () => cleanup(false));
+      this.container.querySelector('[data-dialog-action="confirm"]')?.addEventListener('click', () => cleanup(true));
+      this.overlay.onclick = (e) => { if (e.target === this.overlay) cleanup(false); };
+    });
   }
 
   /**
    * Signature Drawing & Text Dialog
+
    */
   static async promptSignature(): Promise<string | null> {
     const html = `
@@ -3223,5 +3475,395 @@ export class UIDialogs {
       });
     });
   }
-}
 
+  /**
+   * Prompt user to fill form fields interactively
+   */
+  static promptFillForm(
+    fields: Array<{ name: string; type: string; value: string; options?: string[] }>
+  ): Promise<Record<string, any> | null> {
+    return new Promise((resolve) => {
+      const fieldsHtml = fields.length === 0
+        ? '<div style="text-align:center; padding:24px; color:var(--text-muted, #888);"><span class="material-symbols-rounded" style="font-size:40px; display:block; margin-bottom:8px;">info</span>No interactive form fields found in this document.</div>'
+        : fields.map((f, i) => {
+            if (f.type === 'text') {
+              return `<div class="dialog-field">
+                <label class="dialog-label" for="ff_${i}">${f.name}</label>
+                <input id="ff_${i}" type="text" class="dialog-input ff-input" data-field="${f.name}" data-type="text" value="${(f.value || '').replace(/"/g, '&quot;')}" placeholder="Enter text..." />
+              </div>`;
+            } else if (f.type === 'checkbox') {
+              return `<div class="dialog-field" style="flex-direction:row; align-items:center; gap:8px;">
+                <input id="ff_${i}" type="checkbox" class="ff-input" data-field="${f.name}" data-type="checkbox" ${f.value === 'true' ? 'checked' : ''} style="width:18px; height:18px; accent-color:var(--primary-color, #2563eb);" />
+                <label class="dialog-label" for="ff_${i}" style="margin-bottom:0;">${f.name}</label>
+              </div>`;
+            } else if (f.type === 'dropdown') {
+              const optsHtml = (f.options || []).map(o =>
+                `<option value="${o}" ${o === f.value ? 'selected' : ''}>${o}</option>`
+              ).join('');
+              return `<div class="dialog-field">
+                <label class="dialog-label" for="ff_${i}">${f.name}</label>
+                <select id="ff_${i}" class="dialog-input ff-input" data-field="${f.name}" data-type="dropdown">${optsHtml}</select>
+              </div>`;
+            } else if (f.type === 'radio') {
+              const radiosHtml = (f.options || []).map((o) =>
+                `<label style="display:flex; align-items:center; gap:6px; cursor:pointer; padding:2px 0;">
+                  <input type="radio" name="ff_radio_${i}" class="ff-input" data-field="${f.name}" data-type="radio" value="${o}" ${o === f.value ? 'checked' : ''} style="accent-color:var(--primary-color, #2563eb);" />
+                  ${o}
+                </label>`
+              ).join('');
+              return `<div class="dialog-field">
+                <label class="dialog-label">${f.name}</label>
+                <div style="display:flex; flex-direction:column; gap:4px; padding-left:4px;">${radiosHtml}</div>
+              </div>`;
+            }
+            return '';
+          }).join('');
+
+      const html = `
+        <div class="dialog-card" style="min-width:440px; max-width:560px; max-height:80vh;">
+          <div class="dialog-header">
+            <h2 class="dialog-title">
+              <span class="material-symbols-rounded" style="font-size:22px; color:var(--primary-color, #2563eb);">edit_note</span>
+              Fill Form
+            </h2>
+            <button class="dialog-close-btn"><span class="material-symbols-rounded">close</span></button>
+          </div>
+          <div class="dialog-body" style="max-height:55vh; overflow-y:auto; padding:16px 20px;">
+            <p style="font-size:13px; color:var(--text-muted, #888); margin-bottom:12px;">
+              ${fields.length} form field(s) detected. Fill in values below and click Apply.
+            </p>
+            ${fieldsHtml}
+          </div>
+          <div class="dialog-footer">
+            <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
+            <button class="dialog-btn dialog-btn-primary" data-dialog-action="confirm" ${fields.length === 0 ? 'disabled' : ''}>
+              <span class="material-symbols-rounded" style="font-size:16px;">check_circle</span>
+              Apply
+            </button>
+          </div>
+        </div>`;
+
+      this.container.innerHTML = html;
+      this.overlay.classList.remove('hidden');
+
+      const closeBtn = this.container.querySelector('.dialog-close-btn');
+      const cancelBtn = this.container.querySelector('[data-dialog-action="cancel"]');
+      const confirmBtn = this.container.querySelector('[data-dialog-action="confirm"]');
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') { e.preventDefault(); doCleanup(null); }
+      };
+      window.addEventListener('keydown', onKeyDown);
+
+      const doCleanup = (result: Record<string, any> | null) => {
+        window.removeEventListener('keydown', onKeyDown);
+        this.overlay.classList.add('hidden');
+        setTimeout(() => {
+          if (this.overlay.classList.contains('hidden')) this.container.innerHTML = '';
+        }, 150);
+        resolve(result);
+      };
+
+      closeBtn?.addEventListener('click', () => doCleanup(null));
+      cancelBtn?.addEventListener('click', () => doCleanup(null));
+      confirmBtn?.addEventListener('click', () => {
+        const data: Record<string, any> = {};
+        this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('.ff-input').forEach(el => {
+          const fieldName = el.getAttribute('data-field');
+          const fieldType = el.getAttribute('data-type');
+          if (!fieldName) return;
+          if (fieldType === 'checkbox' && el instanceof HTMLInputElement) {
+            data[fieldName] = el.checked ? 'true' : 'false';
+          } else if (fieldType === 'radio' && el instanceof HTMLInputElement) {
+            if (el.checked) data[fieldName] = el.value;
+          } else if (fieldType === 'text' || fieldType === 'dropdown') {
+            data[fieldName] = (el as HTMLInputElement).value;
+          }
+        });
+        doCleanup(data);
+      });
+
+      setTimeout(() => {
+        const firstInput = this.container.querySelector<HTMLInputElement>('.ff-input');
+        firstInput?.focus();
+      }, 100);
+    });
+  }
+
+  /**
+   * Prompt user for form field creation (text / checkbox / radio / dropdown / signature)
+   */
+  static promptAddFormField(
+    fieldType: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'signature',
+    currentPage: number,
+    numPages: number
+  ): Promise<{
+    type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'signature';
+    name: string;
+    pageIndex: number;
+    positionPreset: 'center' | 'top' | 'bottom' | 'custom' | 'pick';
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    defaultValue?: string;
+    options?: string[];
+    multiline?: boolean;
+  } | null> {
+    return new Promise((resolve) => {
+      const typeIcons: Record<string, string> = {
+        text: 'text_fields',
+        checkbox: 'check_box',
+        radio: 'radio_button_checked',
+        dropdown: 'arrow_drop_down_circle',
+        signature: 'draw',
+      };
+
+      const typeLabels: Record<string, string> = {
+        text: 'Text Field',
+        checkbox: 'Checkbox',
+        radio: 'Radio Button Group',
+        dropdown: 'Dropdown List',
+        signature: 'Signature Field',
+      };
+
+      const defaultSizes: Record<string, { w: number; h: number }> = {
+        text: { w: 200, h: 28 },
+        checkbox: { w: 20, h: 20 },
+        radio: { w: 18, h: 18 },
+        dropdown: { w: 200, h: 28 },
+        signature: { w: 240, h: 50 },
+      };
+
+      const icon = typeIcons[fieldType] || 'smart_button';
+      const label = typeLabels[fieldType] || 'Form Field';
+      const size = defaultSizes[fieldType] || { w: 150, h: 28 };
+      const defaultName = `${fieldType}_${Date.now().toString().slice(-4)}`;
+
+      // Build page options
+      const pageOptionsHtml = Array.from({ length: numPages }, (_, i) => {
+        const pNum = i + 1;
+        return `<option value="${i}" ${pNum === currentPage ? 'selected' : ''}>Page ${pNum} of ${numPages}</option>`;
+      }).join('');
+
+      // Build field-specific HTML
+      let specificHtml = '';
+      if (fieldType === 'text') {
+        specificHtml = `
+          <div class="dialog-field">
+            <label class="dialog-label" for="ffDefaultVal">Default Value / Placeholder</label>
+            <input id="ffDefaultVal" type="text" class="dialog-input" placeholder="Optional placeholder text..." />
+          </div>
+          <div class="dialog-field" style="flex-direction:row; align-items:center; gap:8px;">
+            <input id="ffMultiline" type="checkbox" style="width:16px; height:16px; accent-color:var(--primary-color, #2563eb);" />
+            <label class="dialog-label" for="ffMultiline" style="margin-bottom:0; cursor:pointer;">Allow multiple lines (Text Area)</label>
+          </div>`;
+      } else if (fieldType === 'checkbox') {
+        specificHtml = `
+          <div class="dialog-field" style="flex-direction:row; align-items:center; gap:8px;">
+            <input id="ffDefaultChecked" type="checkbox" style="width:16px; height:16px; accent-color:var(--primary-color, #2563eb);" />
+            <label class="dialog-label" for="ffDefaultChecked" style="margin-bottom:0; cursor:pointer;">Checked by default</label>
+          </div>`;
+      } else if (fieldType === 'dropdown') {
+        specificHtml = `
+          <div class="dialog-field">
+            <label class="dialog-label" for="ffOpts">Options (comma-separated)</label>
+            <input id="ffOpts" type="text" class="dialog-input" value="Option 1, Option 2, Option 3" placeholder="Option 1, Option 2, Option 3" />
+          </div>
+          <div class="dialog-field">
+            <label class="dialog-label" for="ffDefaultVal">Default Selected Option</label>
+            <input id="ffDefaultVal" type="text" class="dialog-input" placeholder="Option 1 (leave blank for first option)" />
+          </div>`;
+      } else if (fieldType === 'radio') {
+        specificHtml = `
+          <div class="dialog-field">
+            <label class="dialog-label" for="ffOpts">Choices / Options (comma-separated)</label>
+            <input id="ffOpts" type="text" class="dialog-input" value="Option 1, Option 2, Option 3" placeholder="Option 1, Option 2, Option 3" />
+            <span style="font-size:11px; color:var(--text-muted, #888); margin-top:4px;">Radio buttons will be placed in a clean vertical stack.</span>
+          </div>`;
+      } else if (fieldType === 'signature') {
+        specificHtml = `
+          <div class="dialog-field">
+            <label class="dialog-label" for="ffDefaultVal">Signer Placeholder / Hint</label>
+            <input id="ffDefaultVal" type="text" class="dialog-input" placeholder="e.g. Authorized Signatory" />
+          </div>`;
+      }
+
+      const html = `
+        <div class="dialog-card" style="min-width:440px; max-width:520px;">
+          <div class="dialog-header">
+            <h2 class="dialog-title">
+              <span class="material-symbols-rounded" style="font-size:22px; color:var(--primary-color, #2563eb);">${icon}</span>
+              Add ${label}
+            </h2>
+            <button class="dialog-close-btn"><span class="material-symbols-rounded">close</span></button>
+          </div>
+          <div class="dialog-body" style="padding:16px 20px; display:flex; flex-direction:column; gap:14px; max-height:65vh; overflow-y:auto;">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div class="dialog-field">
+                <label class="dialog-label" for="ffName">Field Name *</label>
+                <input id="ffName" type="text" class="dialog-input" value="${defaultName}" placeholder="e.g. ${defaultName}" required />
+              </div>
+              <div class="dialog-field">
+                <label class="dialog-label" for="ffPage">Target Page</label>
+                <select id="ffPage" class="dialog-input">${pageOptionsHtml}</select>
+              </div>
+            </div>
+
+            ${specificHtml}
+
+            <div style="border-top:1px solid var(--border-color, #e2e8f0); padding-top:12px;">
+              <label class="dialog-label" style="font-weight:600; margin-bottom:8px;">Placement & Size</label>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">
+                <div class="dialog-field">
+                  <label class="dialog-label" for="ffPreset">Position Mode</label>
+                  <select id="ffPreset" class="dialog-input">
+                    <option value="center" selected>Center of Page</option>
+                    <option value="top">Top of Page</option>
+                    <option value="bottom">Bottom of Page</option>
+                    <option value="custom">Custom (X, Y)</option>
+                    <option value="pick">Pick on Document (Click)</option>
+                  </select>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <div class="dialog-field" style="flex:1;">
+                    <label class="dialog-label" for="ffWidth">Width (pt)</label>
+                    <input id="ffWidth" type="number" class="dialog-input" value="${size.w}" min="10" max="800" />
+                  </div>
+                  <div class="dialog-field" style="flex:1;">
+                    <label class="dialog-label" for="ffHeight">Height (pt)</label>
+                    <input id="ffHeight" type="number" class="dialog-input" value="${size.h}" min="10" max="800" />
+                  </div>
+                </div>
+              </div>
+
+              <div id="ffCustomCoordsRow" style="display:none; grid-template-columns:1fr 1fr; gap:12px;">
+                <div class="dialog-field">
+                  <label class="dialog-label" for="ffX">X Position (pt)</label>
+                  <input id="ffX" type="number" class="dialog-input" value="100" min="0" />
+                </div>
+                <div class="dialog-field">
+                  <label class="dialog-label" for="ffY">Y Position (pt)</label>
+                  <input id="ffY" type="number" class="dialog-input" value="400" min="0" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="dialog-footer" style="display:flex; justify-content:space-between; align-items:center;">
+            <button class="dialog-btn" data-dialog-action="pick" style="color:var(--primary-color, #2563eb); border-color:currentColor;">
+              <span class="material-symbols-rounded" style="font-size:16px;">ads_click</span>
+              Click to Place
+            </button>
+            <div style="display:flex; gap:8px;">
+              <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
+              <button class="dialog-btn dialog-btn-primary" data-dialog-action="confirm">
+                <span class="material-symbols-rounded" style="font-size:16px;">add</span>
+                Add Field
+              </button>
+            </div>
+          </div>
+        </div>`;
+
+      this.container.innerHTML = html;
+      this.overlay.classList.remove('hidden');
+
+      const closeBtn = this.container.querySelector('.dialog-close-btn');
+      const cancelBtn = this.container.querySelector('[data-dialog-action="cancel"]');
+      const confirmBtn = this.container.querySelector('[data-dialog-action="confirm"]');
+      const pickBtn = this.container.querySelector('[data-dialog-action="pick"]');
+      const presetSelect = this.container.querySelector<HTMLSelectElement>('#ffPreset');
+      const customRow = this.container.querySelector<HTMLElement>('#ffCustomCoordsRow');
+
+      presetSelect?.addEventListener('change', () => {
+        if (customRow) {
+          customRow.style.display = presetSelect.value === 'custom' ? 'grid' : 'none';
+        }
+      });
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          doCleanup(null);
+        } else if (e.key === 'Enter' && (e.target as HTMLElement)?.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          submitForm(false);
+        }
+      };
+      window.addEventListener('keydown', onKeyDown);
+
+      const doCleanup = (result: any) => {
+        window.removeEventListener('keydown', onKeyDown);
+        this.overlay.classList.add('hidden');
+        setTimeout(() => {
+          if (this.overlay.classList.contains('hidden')) this.container.innerHTML = '';
+        }, 150);
+        resolve(result);
+      };
+
+      const submitForm = (isPick: boolean) => {
+        const nameInput = this.container.querySelector<HTMLInputElement>('#ffName');
+        const name = nameInput?.value?.trim();
+        if (!name) {
+          nameInput?.focus();
+          return;
+        }
+
+        const pageSelect = this.container.querySelector<HTMLSelectElement>('#ffPage');
+        const pageIndex = parseInt(pageSelect?.value || '0', 10);
+
+        const presetVal = isPick ? 'pick' : (presetSelect?.value as any || 'center');
+        const widthInput = this.container.querySelector<HTMLInputElement>('#ffWidth');
+        const heightInput = this.container.querySelector<HTMLInputElement>('#ffHeight');
+        const xInput = this.container.querySelector<HTMLInputElement>('#ffX');
+        const yInput = this.container.querySelector<HTMLInputElement>('#ffY');
+
+        const width = parseInt(widthInput?.value || String(size.w), 10);
+        const height = parseInt(heightInput?.value || String(size.h), 10);
+        const x = xInput ? parseInt(xInput.value || '100', 10) : undefined;
+        const y = yInput ? parseInt(yInput.value || '400', 10) : undefined;
+
+        let defaultValue: string | undefined;
+        let options: string[] | undefined;
+        let multiline = false;
+
+        if (fieldType === 'text') {
+          defaultValue = this.container.querySelector<HTMLInputElement>('#ffDefaultVal')?.value || '';
+          multiline = this.container.querySelector<HTMLInputElement>('#ffMultiline')?.checked || false;
+        } else if (fieldType === 'checkbox') {
+          defaultValue = this.container.querySelector<HTMLInputElement>('#ffDefaultChecked')?.checked ? 'true' : 'false';
+        } else if (fieldType === 'dropdown' || fieldType === 'radio') {
+          const rawOpts = this.container.querySelector<HTMLInputElement>('#ffOpts')?.value || '';
+          options = rawOpts.split(',').map((s) => s.trim()).filter(Boolean);
+          if (fieldType === 'dropdown') {
+            defaultValue = this.container.querySelector<HTMLInputElement>('#ffDefaultVal')?.value?.trim();
+          }
+        } else if (fieldType === 'signature') {
+          defaultValue = this.container.querySelector<HTMLInputElement>('#ffDefaultVal')?.value?.trim();
+        }
+
+        doCleanup({
+          type: fieldType,
+          name,
+          pageIndex,
+          positionPreset: presetVal,
+          width,
+          height,
+          x,
+          y,
+          defaultValue,
+          options,
+          multiline,
+        });
+      };
+
+      closeBtn?.addEventListener('click', () => doCleanup(null));
+      cancelBtn?.addEventListener('click', () => doCleanup(null));
+      confirmBtn?.addEventListener('click', () => submitForm(false));
+      pickBtn?.addEventListener('click', () => submitForm(true));
+
+      setTimeout(() => {
+        this.container.querySelector<HTMLInputElement>('#ffName')?.focus();
+      }, 100);
+    });
+  }
+}

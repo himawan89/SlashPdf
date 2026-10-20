@@ -38,6 +38,8 @@ class SlashPDFApp {
   private draggedPageNum: number | null = null;
   private selectedPageIndices: Set<number> = new Set();
   private lastClickedPageIndex: number | null = null;
+  private cachedTextRange: Range | null = null;
+  private cancelPendingFieldPlacement: (() => void) | null = null;
 
   constructor() {
     this.initTheme();
@@ -433,20 +435,31 @@ class SlashPDFApp {
 
     // Synchronize pointer-events and text selection on annotation canvases & text layers
     const annotCanvases = document.querySelectorAll<HTMLCanvasElement>('.page-annotation-canvas');
+    const isTextMarkupTool = activeTool === 'underline' || activeTool === 'strikethrough' || activeTool === 'highlight';
+
     annotCanvases.forEach((c) => {
-      c.style.pointerEvents = activeTool ? 'auto' : 'none';
+      // For text markup tools: disable annotation canvas pointer events so text layer gets clicks
+      c.style.pointerEvents = (activeTool && !isTextMarkupTool) ? 'auto' : 'none';
     });
 
     const textLayers = document.querySelectorAll<HTMLElement>('.textLayer, .text-layer');
     textLayers.forEach((tl) => {
-      if (activeTool || this.isHandTool) {
+      if (isTextMarkupTool) {
+        // Text markup tools NEED pointer events enabled so spans can be selected
+        tl.style.pointerEvents = 'auto';
+        tl.style.userSelect = 'none';
+        tl.style.cursor = 'text';
+      } else if (activeTool || this.isHandTool) {
         tl.style.pointerEvents = 'none';
         tl.style.userSelect = 'none';
+        tl.style.cursor = '';
       } else {
         tl.style.pointerEvents = 'auto';
-        tl.style.userSelect = 'text';
+        tl.style.userSelect = 'none';
+        tl.style.cursor = '';
       }
     });
+
   }
 
   private initFileHandlers() {
@@ -540,6 +553,32 @@ class SlashPDFApp {
     colorInput?.addEventListener('input', updateProps);
     strokeInput?.addEventListener('input', updateProps);
     opacityInput?.addEventListener('input', updateProps);
+
+    // Cache text selection whenever user selects text in the document
+    document.addEventListener('selectionchange', () => {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim().length > 0) {
+        this.cachedTextRange = sel.getRangeAt(0).cloneRange();
+      }
+    });
+
+    // When mouseup happens on the pages container and a markup tool is active, auto-apply markup
+    const handlePotentialMarkup = () => {
+      const tool = this.annotationManager.getActiveTool();
+      if (tool === 'underline' || tool === 'strikethrough' || tool === 'highlight') {
+        setTimeout(() => {
+          this.applyTextMarkupToSelection(tool);
+        }, 30);
+      }
+    };
+
+    this.pdfPagesContainer?.addEventListener('mouseup', handlePotentialMarkup);
+    document.addEventListener('mouseup', (e) => {
+      const target = e.target as HTMLElement;
+      if (this.pdfPagesContainer?.contains(target)) {
+        handlePotentialMarkup();
+      }
+    });
   }
 
   private initShortcuts() {
@@ -592,14 +631,86 @@ class SlashPDFApp {
         if (this.getActiveDocument()) {
           this.selectAllPages();
         }
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTextInput && this.selectedAnnotId) {
+        // Delete currently selected annotation (shape, note, drawing, stamp, etc.)
+        const doc = this.getActiveDocument();
+        if (doc) {
+          e.preventDefault();
+          const annotId = this.selectedAnnotId;
+          const annot = doc.annotations.find((a) => a.id === annotId);
+          if (annot) {
+            doc.annotations = doc.annotations.filter((a) => a.id !== annotId);
+            doc.comments = doc.comments.filter((c) => c.annotationId !== annotId);
+            this.selectedAnnotId = null;
+
+            // Re-render annotation canvas on affected page
+            const pageIndex = annot.pageIndex;
+            const wrapper = document.getElementById(`pageWrapper_${pageIndex + 1}`);
+            const canvas = wrapper?.querySelector<HTMLCanvasElement>('.page-annotation-canvas');
+            if (canvas) {
+              const pAnnots = doc.annotations.filter((a) => a.pageIndex === pageIndex);
+              this.annotationManager.renderAnnotations(canvas, pAnnots, doc.scale, null);
+            }
+
+            this.renderCommentsList();
+            this.pushHistorySnapshot('Delete annotation');
+            this.showToast('Object deleted.', 'info');
+          }
+        }
       } else if (e.key === 'Delete' && !isTextInput && this.selectedPageIndices.size > 0) {
-        // Delete selected pages
+        // Delete selected pages in sidebar
         e.preventDefault();
         this.handleSelectionBarAction('delete');
       } else if (e.key === 'Escape') {
+        const dialogOverlay = document.getElementById('dialogOverlay');
+        if (dialogOverlay && !dialogOverlay.classList.contains('hidden')) {
+          return; // Modal dialog handles its own Escape
+        }
+
+        if (this.cancelPendingFieldPlacement) {
+          this.cancelPendingFieldPlacement();
+          return;
+        }
+
         this.closeContextMenu();
         if (this.selectedPageIndices.size > 0) {
           this.clearSelection();
+        }
+
+        const hadActiveTool =
+          this.annotationManager.getActiveTool() !== null ||
+          this.isHandTool ||
+          this.isTextEditMode ||
+          this.selectedAnnotId !== null;
+
+        if (this.isTextEditMode) {
+          this.exitTextEditMode();
+        }
+
+        this.isHandTool = false;
+        this.annotationManager.setActiveTool(null);
+        this.selectedAnnotId = null;
+        this.updateToolButtons();
+        this.updateCursorMode();
+
+        const doc = this.getActiveDocument();
+        if (doc) {
+          document.querySelectorAll<HTMLCanvasElement>('.page-annotation-canvas').forEach((c, idx) => {
+            const pAnnots = doc.annotations.filter((a) => a.pageIndex === idx);
+            this.annotationManager.renderAnnotations(c, pAnnots, doc.scale, null);
+          });
+        }
+
+        if (window.getSelection()?.toString()) {
+          window.getSelection()?.removeAllRanges();
+        }
+
+        if (isTextInput && activeEl instanceof HTMLElement) {
+          activeEl.blur();
+        }
+
+        if (hadActiveTool) {
+          this.showToast('Switched to Selection Tool', 'info');
         }
       }
     });
@@ -848,6 +959,60 @@ class SlashPDFApp {
 
       // Render selectable text elements
       await PDFViewerManager.renderTextLayer(page, viewport, textLayerDiv);
+
+      // Prevent clicking outside text from selecting the whole document
+      textLayerDiv.addEventListener('mousedown', (e) => {
+        if (e.target !== textLayerDiv) return;
+
+        const clickX = e.clientX;
+        const clickY = e.clientY;
+
+        const spans = Array.from(textLayerDiv.querySelectorAll('span'));
+        if (spans.length === 0) return;
+
+        let closestSpan: HTMLSpanElement | null = null;
+        let minDistance = Infinity;
+
+        for (const span of spans) {
+          const rect = span.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+
+          // Vertical distance: must be on roughly the same line (within 14px)
+          const dy = clickY < rect.top ? rect.top - clickY : clickY > rect.bottom ? clickY - rect.bottom : 0;
+          if (dy > 14) continue;
+
+          // Horizontal distance to the span edges
+          const dx = clickX < rect.left ? rect.left - clickX : clickX > rect.right ? clickX - rect.right : 0;
+          const dist = dy * 2 + dx;
+
+          if (dist < minDistance && dx < 60) {
+            minDistance = dist;
+            closestSpan = span;
+          }
+        }
+
+        if (closestSpan) {
+          const rect = closestSpan.getBoundingClientRect();
+          const sel = window.getSelection();
+          if (sel) {
+            sel.removeAllRanges();
+            const range = document.createRange();
+            const textNode = closestSpan.firstChild || closestSpan;
+            if (clickX <= rect.left + rect.width / 2) {
+              range.setStart(textNode, 0);
+              range.setEnd(textNode, 0);
+            } else {
+              const len = textNode.textContent?.length || 0;
+              range.setStart(textNode, len);
+              range.setEnd(textNode, len);
+            }
+            sel.addRange(range);
+          }
+        } else {
+          // If clicked far away in empty whitespace, clear any previous selection
+          window.getSelection()?.removeAllRanges();
+        }
+      });
 
       // Render interactive link annotations & internal document jumps
       await PDFViewerManager.renderAnnotationLinks(
@@ -1950,10 +2115,193 @@ class SlashPDFApp {
   /* ========================================================================
      5. Interactive Page Canvas Annotations (Drawing, Highlighter, Shapes)
      ======================================================================== */
+
+  // Track the currently selected annotation for dragging
+  private selectedAnnotId: string | null = null;
+
+  /**
+   * Applies text markup (underline, strikethrough, highlight) to currently selected text.
+   * Can be triggered either on mouseup when markup tool is active, or when clicking
+   * the tool button while text is already selected.
+   */
+  private applyTextMarkupToSelection(tool: AnnotationType): boolean {
+    const sel = window.getSelection();
+    let range: Range | null = null;
+
+    if (sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim().length > 0) {
+      range = sel.getRangeAt(0);
+    } else if (
+      this.cachedTextRange &&
+      !this.cachedTextRange.collapsed &&
+      this.cachedTextRange.toString().trim().length > 0
+    ) {
+      range = this.cachedTextRange;
+    }
+
+    if (!range) return false;
+
+    const doc = this.getActiveDocument();
+    if (!doc) return false;
+
+    const rawRects = Array.from(range.getClientRects()).filter(
+      (r) => r.width >= 2 && r.height >= 2
+    );
+    if (rawRects.length === 0) return false;
+
+    // Merge adjacent / overlapping rects on the same line
+    const mergedRects = this.mergeAdjacentLineRects(rawRects);
+
+    const pageWrappers = Array.from(
+      this.pdfPagesContainer.querySelectorAll<HTMLElement>('.pdf-page-wrapper')
+    );
+    if (pageWrappers.length === 0) return false;
+
+    let createdCount = 0;
+    const modifiedPages = new Set<number>();
+
+    for (const cr of mergedRects) {
+      const crMidY = cr.top + cr.height / 2;
+      const crMidX = cr.left + cr.width / 2;
+
+      // Find matching page wrapper
+      let targetWrapper = pageWrappers.find((pw) => {
+        const pwRect = pw.getBoundingClientRect();
+        return (
+          crMidY >= pwRect.top &&
+          crMidY <= pwRect.bottom &&
+          crMidX >= pwRect.left &&
+          crMidX <= pwRect.right
+        );
+      });
+
+      if (!targetWrapper) {
+        targetWrapper = pageWrappers.find((pw) => {
+          const pwRect = pw.getBoundingClientRect();
+          return (cr.top + cr.height) >= pwRect.top && cr.top <= pwRect.bottom;
+        });
+      }
+
+      if (!targetWrapper) continue;
+
+      const match = targetWrapper.id.match(/pageWrapper_(\d+)/);
+      if (!match) continue;
+      const pageIndex = parseInt(match[1], 10) - 1;
+
+      const pwRect = targetWrapper.getBoundingClientRect();
+      const scale = doc.scale;
+
+      const x = (cr.left - pwRect.left) / scale;
+      const y = (cr.top - pwRect.top) / scale;
+      const width = cr.width / scale;
+      const height = cr.height / scale;
+
+      let color = this.annotationManager.getCurrentColor();
+      if (!color || color === '#FBBF24') {
+        if (tool === 'underline') color = '#2563EB';
+        else if (tool === 'strikethrough') color = '#DC2626';
+      }
+
+      const annot = this.annotationManager.createAnnotation(pageIndex, tool, {
+        rect: { x, y, width, height },
+        color,
+        strokeWidth: tool === 'highlight' ? 1 : 2,
+        opacity: tool === 'highlight' ? 0.4 : 1.0,
+      });
+
+      doc.annotations.push(annot);
+      createdCount++;
+      modifiedPages.add(pageIndex);
+    }
+
+    if (createdCount > 0) {
+      this.cachedTextRange = null;
+      window.getSelection()?.removeAllRanges();
+
+      for (const pIdx of modifiedPages) {
+        const wrapper = document.getElementById(`pageWrapper_${pIdx + 1}`);
+        const canvas = wrapper?.querySelector<HTMLCanvasElement>('.page-annotation-canvas');
+        if (canvas) {
+          const pageAnnots = doc.annotations.filter((a) => a.pageIndex === pIdx);
+          this.annotationManager.renderAnnotations(canvas, pageAnnots, doc.scale);
+        }
+      }
+
+      this.pushHistorySnapshot(`Add ${tool}`);
+      const label =
+        tool === 'underline'
+          ? 'Underline'
+          : tool === 'strikethrough'
+          ? 'Strikethrough'
+          : 'Highlight';
+      this.showToast(`${label} applied to selected text.`, 'success');
+      return true;
+    }
+
+    return false;
+  }
+
+  private mergeAdjacentLineRects(
+    rects: DOMRect[]
+  ): { left: number; top: number; width: number; height: number }[] {
+    if (rects.length <= 1) {
+      return rects.map((r) => ({
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      }));
+    }
+
+    const sorted = [...rects].sort((a, b) => {
+      if (Math.abs(a.top - b.top) > 6) return a.top - b.top;
+      return a.left - b.left;
+    });
+
+    const result: { left: number; top: number; width: number; height: number }[] = [];
+    let cur = {
+      left: sorted[0].left,
+      top: sorted[0].top,
+      width: sorted[0].width,
+      height: sorted[0].height,
+    };
+
+    for (let i = 1; i < sorted.length; i++) {
+      const next = sorted[i];
+      const sameLine = Math.abs(cur.top - next.top) <= 8;
+      const adjacent = next.left <= cur.left + cur.width + 12;
+
+      if (sameLine && adjacent) {
+        const maxRight = Math.max(cur.left + cur.width, next.left + next.width);
+        cur.width = maxRight - cur.left;
+        cur.height = Math.max(cur.height, next.height);
+        cur.top = Math.min(cur.top, next.top);
+      } else {
+        result.push(cur);
+        cur = {
+          left: next.left,
+          top: next.top,
+          width: next.width,
+          height: next.height,
+        };
+      }
+    }
+    result.push(cur);
+    return result;
+  }
+
   private attachPageAnnotationHandler(canvas: HTMLCanvasElement, pageIndex: number) {
     let isDown = false;
     let startPos = { x: 0, y: 0 };
     let points: { x: number; y: number }[] = [];
+
+    // Drag state
+    let isDragging = false;
+    let dragAnnotId: string | null = null;
+    let dragOrigRect: { x: number; y: number; width: number; height: number } | null = null;
+    let dragOrigPoints: { x: number; y: number }[] | null = null;
+
+    // Hover state for eraser tool
+    let hoveredAnnotId: string | null = null;
 
     const getCoord = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -1964,19 +2312,176 @@ class SlashPDFApp {
       };
     };
 
+    const rerenderPage = (selId?: string | null) => {
+      const doc = this.getActiveDocument();
+      if (!doc) return;
+      const existing = doc.annotations.filter((a) => a.pageIndex === pageIndex);
+      this.annotationManager.renderAnnotations(
+        canvas,
+        existing,
+        doc.scale,
+        selId !== undefined ? selId : this.selectedAnnotId,
+        hoveredAnnotId
+      );
+    };
+
+    // ----------------------------------------------------------------
+    // MOUSEDOWN
+    // ----------------------------------------------------------------
     canvas.addEventListener('mousedown', (e) => {
       const tool = this.annotationManager.getActiveTool();
       if (!tool) return;
+      const pos = getCoord(e);
+
+      // Eraser: handled in mousedown (single click = erase)
+      if (tool === 'eraser') {
+        const doc = this.getActiveDocument();
+        if (!doc) return;
+        const pageAnnots = doc.annotations.filter((a) => a.pageIndex === pageIndex);
+        const hit = this.annotationManager.hitTest(pageAnnots, pos.x, pos.y);
+        if (hit) {
+          doc.annotations = doc.annotations.filter((a) => a.id !== hit.id);
+          // Also remove from comments if linked
+          doc.comments = doc.comments.filter((c) => c.annotationId !== hit.id);
+          this.renderCommentsList();
+          rerenderPage(null);
+          this.pushHistorySnapshot('Erase annotation');
+          this.showToast('Annotation erased.', 'info');
+        } else {
+          this.showToast('Click on an annotation to erase it.', 'info');
+        }
+        return;
+      }
+
+      // Text markup tools: check if there's already a selection before starting a new drag
+      if (tool === 'underline' || tool === 'strikethrough') {
+        isDown = true;
+        startPos = pos;
+        points = [pos];
+        return;
+      }
+
+      // Check if we're clicking an existing annotation to select or drag it
+      if (
+        tool === 'rectangle' || tool === 'ellipse' || tool === 'line' ||
+        tool === 'arrow' || tool === 'freehand' || tool === 'sticky-note' ||
+        tool === 'text-comment' || tool === 'stamp' || tool === 'highlight' ||
+        tool === 'measure'
+      ) {
+        const doc = this.getActiveDocument();
+        if (!doc) return;
+        const pageAnnots = doc.annotations.filter((a) => a.pageIndex === pageIndex);
+        const hit = this.annotationManager.hitTest(pageAnnots, pos.x, pos.y);
+
+        if (hit) {
+          // Immediately select and prepare smooth drag with stable hold point
+          this.selectedAnnotId = hit.id;
+          isDragging = true;
+          dragAnnotId = hit.id;
+          startPos = pos; // Hold point reference
+          dragOrigRect = hit.rect ? { ...hit.rect } : null;
+          dragOrigPoints = hit.points ? hit.points.map((p) => ({ ...p })) : null;
+          canvas.style.cursor = 'grabbing';
+          rerenderPage(hit.id);
+          e.preventDefault();
+          return;
+        } else {
+          // Deselect if clicking empty space
+          if (this.selectedAnnotId) {
+            this.selectedAnnotId = null;
+            rerenderPage(null);
+          }
+        }
+      }
+
+      // Text comment and sticky-note: handled in mouseup (single click on empty canvas)
+      if (tool === 'sticky-note' || tool === 'text-comment') {
+        isDown = true;
+        startPos = pos;
+        return;
+      }
+
       isDown = true;
-      startPos = getCoord(e);
-      points = [startPos];
+      startPos = pos;
+      points = [pos];
     });
 
+    // ----------------------------------------------------------------
+    // MOUSEMOVE
+    // ----------------------------------------------------------------
     canvas.addEventListener('mousemove', (e) => {
-      if (!isDown) return;
       const tool = this.annotationManager.getActiveTool();
       if (!tool) return;
       const currentPos = getCoord(e);
+
+      // Drag move: 1:1 smooth translation with boundary clamping
+      if (isDragging && dragAnnotId) {
+        const doc = this.getActiveDocument();
+        if (!doc) return;
+        const annot = doc.annotations.find((a) => a.id === dragAnnotId);
+        if (!annot) return;
+
+        const dx = currentPos.x - startPos.x;
+        const dy = currentPos.y - startPos.y;
+        if (isNaN(dx) || isNaN(dy)) return;
+
+        const maxCoordX = canvas.width / doc.scale;
+        const maxCoordY = canvas.height / doc.scale;
+
+        let effectiveDx = dx;
+        let effectiveDy = dy;
+
+        if (dragOrigRect && annot.rect) {
+          const annotW = dragOrigRect.width;
+          const annotH = dragOrigRect.height;
+          const clampedX = Math.max(0, Math.min(maxCoordX - annotW, Math.round(dragOrigRect.x + dx)));
+          const clampedY = Math.max(0, Math.min(maxCoordY - annotH, Math.round(dragOrigRect.y + dy)));
+          effectiveDx = clampedX - dragOrigRect.x;
+          effectiveDy = clampedY - dragOrigRect.y;
+
+          annot.rect = {
+            x: clampedX,
+            y: clampedY,
+            width: annotW,
+            height: annotH,
+          };
+        }
+
+        if (dragOrigPoints && annot.points) {
+          annot.points = dragOrigPoints.map((p) => ({
+            x: Math.round(p.x + effectiveDx),
+            y: Math.round(p.y + effectiveDy),
+          }));
+        }
+        rerenderPage(dragAnnotId);
+        return;
+      }
+
+      // Hover check for all annotations when not dragging and not drawing
+      if (!isDown) {
+        const doc = this.getActiveDocument();
+        if (doc) {
+          const pageAnnots = doc.annotations.filter((a) => a.pageIndex === pageIndex);
+          const hit = this.annotationManager.hitTest(pageAnnots, currentPos.x, currentPos.y);
+          const newHoverId = hit?.id ?? null;
+          if (newHoverId !== hoveredAnnotId) {
+            hoveredAnnotId = newHoverId;
+            if (tool === 'eraser') {
+              canvas.style.cursor = hit ? 'not-allowed' : 'crosshair';
+            } else if (hit) {
+              canvas.style.cursor = 'grab';
+            } else {
+              canvas.style.cursor = 'crosshair';
+            }
+            rerenderPage();
+          }
+        }
+        if (tool === 'eraser') return;
+      }
+
+      if (!isDown) return;
+      if (tool === 'sticky-note' || tool === 'text-comment') return;
+      if (tool === 'underline' || tool === 'strikethrough') return; // Text layer handles selection visual
 
       if (tool === 'freehand') {
         points.push(currentPos);
@@ -1984,7 +2489,7 @@ class SlashPDFApp {
 
       const doc = this.getActiveDocument()!;
       const existing = doc.annotations.filter((a) => a.pageIndex === pageIndex);
-      this.annotationManager.renderAnnotations(canvas, existing, doc.scale);
+      this.annotationManager.renderAnnotations(canvas, existing, doc.scale, this.selectedAnnotId, hoveredAnnotId);
 
       const previewAnnot = this.annotationManager.createAnnotation(pageIndex, tool, {
         points: tool === 'freehand' ? points : [startPos, currentPos],
@@ -1995,22 +2500,78 @@ class SlashPDFApp {
           height: Math.abs(currentPos.y - startPos.y),
         },
       });
-      this.annotationManager.renderAnnotations(canvas, [...existing, previewAnnot], doc.scale);
+      this.annotationManager.renderAnnotations(canvas, [...existing, previewAnnot], doc.scale, this.selectedAnnotId, hoveredAnnotId);
     });
 
+    // ----------------------------------------------------------------
+    // MOUSEUP
+    // ----------------------------------------------------------------
     canvas.addEventListener('mouseup', async (e) => {
-      if (!isDown) return;
-      isDown = false;
       const tool = this.annotationManager.getActiveTool();
       if (!tool) return;
+
       const endPos = getCoord(e);
+
+      // Finish drag
+      if (isDragging && dragAnnotId) {
+        const didMove = Math.hypot(endPos.x - startPos.x, endPos.y - startPos.y) > 3;
+        const finishedAnnotId = dragAnnotId;
+        isDragging = false;
+        canvas.style.cursor = 'grab';
+        rerenderPage(finishedAnnotId);
+        if (didMove) {
+          this.pushHistorySnapshot('Move annotation');
+        }
+        dragAnnotId = null;
+        dragOrigRect = null;
+        dragOrigPoints = null;
+        return;
+      }
+
+      if (!isDown) return;
+      isDown = false;
+
       const doc = this.getActiveDocument()!;
 
+      // Eraser: handled in mousedown already
+      if (tool === 'eraser') return;
+
+      // Text markup via selection (underline, strikethrough)
+      if (tool === 'underline' || tool === 'strikethrough') {
+        const applied = this.applyTextMarkupToSelection(tool);
+        if (!applied) {
+          const rect = {
+            x: Math.min(startPos.x, endPos.x),
+            y: Math.min(startPos.y, endPos.y),
+            width: Math.abs(endPos.x - startPos.x),
+            height: Math.abs(endPos.y - startPos.y),
+          };
+          if (rect.width > 4 && rect.height > 4) {
+            let color = this.annotationManager.getCurrentColor();
+            if (!color || color === '#FBBF24') {
+              if (tool === 'underline') color = '#2563EB';
+              else if (tool === 'strikethrough') color = '#DC2626';
+            }
+            const annot = this.annotationManager.createAnnotation(pageIndex, tool, {
+              rect,
+              color,
+              strokeWidth: 2,
+              opacity: 1.0,
+            });
+            doc.annotations.push(annot);
+            rerenderPage();
+            this.pushHistorySnapshot('Add markup');
+          }
+        }
+        return;
+      }
+
+      // Sticky note: show proper dialog
       if (tool === 'sticky-note') {
-        const text = prompt('Enter sticky note text:');
+        const text = await UIDialogs.promptNoteText('Add Sticky Note', 'Type your sticky note text... (Ctrl+Enter to save)');
         if (text) {
-          const annot = this.annotationManager.createAnnotation(pageIndex, tool, {
-            rect: { x: endPos.x, y: endPos.y, width: 24, height: 24 },
+          const annot = this.annotationManager.createAnnotation(pageIndex, 'sticky-note', {
+            rect: { x: endPos.x, y: endPos.y, width: 140, height: 90 },
             text,
           });
           doc.annotations.push(annot);
@@ -2019,45 +2580,177 @@ class SlashPDFApp {
             pageIndex,
             author: 'User',
             text,
-            timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
             annotationId: annot.id,
           });
+          this.selectedAnnotId = annot.id;
+          rerenderPage(annot.id);
           this.renderCommentsList();
+          this.pushHistorySnapshot('Add sticky note');
         }
-      } else if (tool === 'stamp') {
-        const stampData = await UIDialogs.promptStamp();
-        if (stampData) {
-          const annot = this.annotationManager.createAnnotation(pageIndex, 'stamp', {
-            rect: { x: endPos.x - 70, y: endPos.y - 25, width: 140, height: 50 },
-            text: stampData.text,
-          });
-          annot.color = stampData.color;
-          doc.annotations.push(annot);
-        }
-      } else {
-        const annot = this.annotationManager.createAnnotation(pageIndex, tool, {
-          points: tool === 'freehand' ? points : [startPos, endPos],
-          rect: {
-            x: Math.min(startPos.x, endPos.x),
-            y: Math.min(startPos.y, endPos.y),
-            width: Math.abs(endPos.x - startPos.x),
-            height: Math.abs(endPos.y - startPos.y),
-          },
-        });
-        doc.annotations.push(annot);
+        return;
       }
 
-      const existing = doc.annotations.filter((a) => a.pageIndex === pageIndex);
-      this.annotationManager.renderAnnotations(canvas, existing, doc.scale);
+      // Text comment: show proper dialog
+      if (tool === 'text-comment') {
+        const text = await UIDialogs.promptNoteText('Add Comment', 'Type your comment here... (Ctrl+Enter to save)');
+        if (text) {
+          const rect = {
+            x: Math.min(startPos.x, endPos.x),
+            y: Math.min(startPos.y, endPos.y),
+            width: Math.max(140, Math.abs(endPos.x - startPos.x)),
+            height: Math.max(90, Math.abs(endPos.y - startPos.y)),
+          };
+          if (Math.abs(endPos.x - startPos.x) < 10 && Math.abs(endPos.y - startPos.y) < 10) {
+            rect.x = endPos.x;
+            rect.y = endPos.y;
+            rect.width = 140;
+            rect.height = 90;
+          }
+          const annot = this.annotationManager.createAnnotation(pageIndex, 'text-comment', { rect, text });
+          doc.annotations.push(annot);
+          doc.comments.push({
+            id: 'c_' + Math.random().toString(36).substring(2, 9),
+            pageIndex,
+            author: 'User',
+            text,
+            timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+            annotationId: annot.id,
+          });
+          this.selectedAnnotId = annot.id;
+          rerenderPage(annot.id);
+          this.renderCommentsList();
+          this.pushHistorySnapshot('Add comment');
+        }
+        return;
+      }
+
+      // Stamp: show dialog and auto-size based on content
+      if (tool === 'stamp') {
+        const stampData = await UIDialogs.promptStamp();
+        if (stampData) {
+          const lines = stampData.lines.length > 0 ? stampData.lines : [stampData.text];
+          const subLines = lines.slice(1);
+          const longestLine = lines.reduce((a, b) => (a.length > b.length ? a : b), '');
+          const estimatedW = Math.max(140, Math.min(280, longestLine.length * 10 + 40));
+          const estimatedH = Math.max(50, 32 + subLines.length * 18);
+
+          const annot = this.annotationManager.createAnnotation(pageIndex, 'stamp', {
+            rect: {
+              x: endPos.x - estimatedW / 2,
+              y: endPos.y - estimatedH / 2,
+              width: estimatedW,
+              height: estimatedH,
+            },
+            text: stampData.text,
+            extra: { lines: stampData.lines },
+          });
+          annot.color = stampData.color;
+          annot.opacity = 0.9;
+          doc.annotations.push(annot);
+          this.selectedAnnotId = annot.id;
+          rerenderPage(annot.id);
+          this.pushHistorySnapshot('Add stamp');
+        }
+        return;
+      }
+
+      let annotRect = {
+        x: Math.min(startPos.x, endPos.x),
+        y: Math.min(startPos.y, endPos.y),
+        width: Math.abs(endPos.x - startPos.x),
+        height: Math.abs(endPos.y - startPos.y),
+      };
+
+      if (tool === 'freehand' && points.length > 0) {
+        const xs = points.map((p) => p.x);
+        const ys = points.map((p) => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        annotRect = {
+          x: minX,
+          y: minY,
+          width: Math.max(10, maxX - minX),
+          height: Math.max(10, maxY - minY),
+        };
+      }
+
+      // All other tools (shapes, freehand, line, arrow, highlight, measure)
+      const annot = this.annotationManager.createAnnotation(pageIndex, tool, {
+        points: tool === 'freehand' ? points : [startPos, endPos],
+        rect: annotRect,
+      });
+      doc.annotations.push(annot);
+
+      rerenderPage();
       this.pushHistorySnapshot('Add annotation');
     });
+
+    // ----------------------------------------------------------------
+    // DOUBLE-CLICK: Edit existing note or comment text
+    // ----------------------------------------------------------------
+    canvas.addEventListener('dblclick', async (e) => {
+      const pos = getCoord(e);
+      const doc = this.getActiveDocument();
+      if (!doc) return;
+      const pageAnnots = doc.annotations.filter((a) => a.pageIndex === pageIndex);
+      const hit = this.annotationManager.hitTest(pageAnnots, pos.x, pos.y);
+      if (hit && (hit.type === 'sticky-note' || hit.type === 'text-comment')) {
+        const newText = await UIDialogs.promptNoteText(
+          'Edit Note',
+          'Edit your note text... (Ctrl+Enter to save)',
+          hit.text || ''
+        );
+        if (newText !== null && newText !== undefined && newText.trim() !== '') {
+          hit.text = newText;
+          const comment = doc.comments.find((c) => c.annotationId === hit.id);
+          if (comment) {
+            comment.text = newText;
+            this.renderCommentsList();
+          }
+          rerenderPage(hit.id);
+          this.pushHistorySnapshot('Edit note');
+        }
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // MOUSELEAVE & WINDOW MOUSEUP
+    // ----------------------------------------------------------------
+    canvas.addEventListener('mouseleave', () => {
+      if (hoveredAnnotId) {
+        hoveredAnnotId = null;
+        if (!isDragging) {
+          rerenderPage();
+        }
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging && dragAnnotId) {
+        isDragging = false;
+        canvas.style.cursor = 'crosshair';
+        rerenderPage(dragAnnotId);
+        this.pushHistorySnapshot('Move annotation');
+        dragAnnotId = null;
+        dragOrigRect = null;
+        dragOrigPoints = null;
+      }
+    });
   }
+
 
   private updateToolButtons() {
     const activeTool = this.annotationManager.getActiveTool();
     document.querySelectorAll('.annotation-tool').forEach((btn) => {
       const tool = btn.getAttribute('data-tool');
-      btn.classList.toggle('active', tool === activeTool);
+      const isActive = tool === activeTool;
+      btn.classList.toggle('active', isActive);
+      if (!isActive && document.activeElement === btn) {
+        (btn as HTMLElement).blur();
+      }
     });
   }
 
@@ -2526,7 +3219,37 @@ class SlashPDFApp {
       // --- REVIEW & MARKUP TOOLS ---
       case 'tool-highlight':
       case 'tool-underline':
-      case 'tool-strikethrough':
+      case 'tool-strikethrough': {
+        const toolName = action.replace('tool-', '') as AnnotationType;
+
+        // 1. If text is already selected, apply markup immediately!
+        const applied = this.applyTextMarkupToSelection(toolName);
+        if (applied) {
+          this.annotationManager.setActiveTool(null);
+          this.updateToolButtons();
+          this.updateCursorMode();
+          break;
+        }
+
+        // 2. Otherwise toggle tool activation for future selection
+        if (this.annotationManager.getActiveTool() === toolName) {
+          this.annotationManager.setActiveTool(null);
+        } else {
+          this.annotationManager.setActiveTool(toolName);
+          this.isHandTool = false;
+          const verb =
+            toolName === 'underline'
+              ? 'underline'
+              : toolName === 'strikethrough'
+              ? 'strike out'
+              : 'highlight';
+          this.showToast(`Select text on the page to ${verb} it.`, 'info');
+        }
+        this.updateToolButtons();
+        this.updateCursorMode();
+        break;
+      }
+
       case 'tool-sticky-note':
       case 'tool-text-comment':
       case 'tool-line':
@@ -2541,11 +3264,21 @@ class SlashPDFApp {
         } else {
           this.annotationManager.setActiveTool(toolName);
           this.isHandTool = false;
+
+          // Show contextual hints
+          if (toolName === 'sticky-note') {
+            this.showToast('Click anywhere on the page to add a sticky note.', 'info');
+          } else if (toolName === 'text-comment') {
+            this.showToast('Click or drag on the page to add a comment box.', 'info');
+          } else if (toolName === 'eraser') {
+            this.showToast('Click on any annotation to erase it.', 'info');
+          }
         }
         this.updateToolButtons();
         this.updateCursorMode();
         break;
       }
+
 
       case 'stamp': {
         this.annotationManager.setActiveTool('stamp');
@@ -2566,14 +3299,59 @@ class SlashPDFApp {
       }
 
       case 'delete-annotations': {
-        if (!doc) return;
-        if (confirm('Clear all annotations from this document?')) {
+        if (!doc) {
+          this.showToast('Please open a document first.', 'warning');
+          return;
+        }
+
+        const annotationsCount = doc.annotations.length;
+        const commentsCount = doc.comments.length;
+        const hasHistory = !!((doc.history && doc.history.length > 1) || doc.isModified);
+
+        if (annotationsCount === 0 && commentsCount === 0 && !hasHistory) {
+          this.showToast('No annotations or edits found to clear.', 'info');
+          return;
+        }
+
+        const result = await UIDialogs.promptConfirmClearReview({
+          annotationsCount,
+          commentsCount,
+          hasHistory,
+        });
+
+        if (!result) return;
+
+        if (result.action === 'revert-original') {
+          this.setStatus('Reverting document to original state...');
+          if (doc.history && doc.history.length > 0) {
+            const initial = doc.history[0];
+            await this.reloadActiveDocBytes(initial.fileBytes, false, 'Revert to original state');
+            doc.annotations = (initial.annotations || []).map((a) => ({ ...a }));
+            doc.comments = (initial.comments || []).map((c) => ({ ...c }));
+          } else {
+            doc.annotations = [];
+            doc.comments = [];
+          }
+          this.selectedAnnotId = null;
+          document.querySelectorAll<HTMLCanvasElement>('.page-annotation-canvas').forEach((c) => {
+            const ctx = c.getContext('2d');
+            ctx?.clearRect(0, 0, c.width, c.height);
+          });
+          this.renderCommentsList();
+          this.renderActiveDocument();
+          this.showToast('Document successfully reverted to its original state.', 'success');
+        } else {
+          // Clear review annotations & notes
           doc.annotations = [];
           doc.comments = [];
-          this.pushHistorySnapshot('Clear annotations');
-          this.renderActiveDocument();
+          this.selectedAnnotId = null;
+          document.querySelectorAll<HTMLCanvasElement>('.page-annotation-canvas').forEach((c) => {
+            const ctx = c.getContext('2d');
+            ctx?.clearRect(0, 0, c.width, c.height);
+          });
           this.renderCommentsList();
-          this.showToast('All annotations cleared.', 'info');
+          this.pushHistorySnapshot('Clear all annotations');
+          this.showToast('All annotations, drawings, and notes have been cleared.', 'success');
         }
         break;
       }
@@ -2615,111 +3393,90 @@ class SlashPDFApp {
       }
 
       // --- FORMS ---
+      case 'fill-form': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        this.setStatus('Scanning form fields...');
+        try {
+          const fields = await PDFEditorService.getFormFieldsSummary(doc.fileBytes);
+          if (fields.length === 0) {
+            this.showToast('No interactive form fields found in this document.', 'info');
+            break;
+          }
+          const formData = await UIDialogs.promptFillForm(fields);
+          if (formData && Object.keys(formData).length > 0) {
+            this.setStatus('Filling form fields...');
+            const newBytes = await PDFEditorService.fillForm(doc.fileBytes, formData);
+            await this.reloadActiveDocBytes(newBytes, false, 'Fill form');
+            this.showToast(`Form filled: ${Object.keys(formData).length} field(s) updated.`, 'success');
+          }
+        } catch (err) {
+          console.error('Fill form error:', err);
+          this.showToast('Error scanning form fields. The document may not contain interactive forms.', 'error');
+        }
+        break;
+      }
       case 'reset-form': {
-        if (!doc) return;
-        this.showToast('Form fields reset to defaults.', 'info');
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        try {
+          const fields = await PDFEditorService.getFormFieldsSummary(doc.fileBytes);
+          if (fields.length === 0) {
+            this.showToast('No form fields found to reset.', 'info');
+            break;
+          }
+          const confirmed = await UIDialogs.confirm(
+            'Reset Form Fields',
+            `This will clear all ${fields.length} form field value(s) back to their defaults. This action can be undone with Ctrl+Z.`,
+            'Reset All Fields',
+            true
+          );
+          if (!confirmed) break;
+          this.setStatus('Resetting form fields...');
+          const newBytes = await PDFEditorService.resetForm(doc.fileBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Reset form');
+          this.showToast(`All ${fields.length} form field(s) reset to defaults.`, 'success');
+        } catch (err) {
+          console.error('Reset form error:', err);
+          this.showToast('Error resetting form fields.', 'error');
+        }
         break;
       }
       case 'flatten-form': {
-        if (!doc) return;
-        this.setStatus('Flattening form fields...');
-        const newBytes = await PDFEditorService.flattenForm(doc.fileBytes);
-        await this.reloadActiveDocBytes(newBytes);
-        this.showToast('Form fields flattened into document content.', 'success');
-        break;
-      }
-      case 'add-text-field': {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
-        const name = prompt('Field name:', `field_${Date.now()}`);
-        if (!name) break;
-        this.setStatus('Adding text field...');
-        const newBytes = await PDFEditorService.addFormField(doc.fileBytes, doc.currentPage - 1, {
-          type: 'text',
-          name,
-          x: 100,
-          y: 600,
-          width: 200,
-          height: 30,
-        });
-        await this.reloadActiveDocBytes(newBytes);
-        this.showToast(`Text field "${name}" added to page ${doc.currentPage}.`, 'success');
+        try {
+          const fields = await PDFEditorService.getFormFieldsSummary(doc.fileBytes);
+          const confirmed = await UIDialogs.confirm(
+            'Flatten Form Fields',
+            `This will permanently convert ${fields.length || 'all'} form field(s) into static page content. The fields will no longer be editable. This action can be undone with Ctrl+Z.`,
+            'Flatten Fields',
+            true
+          );
+          if (!confirmed) break;
+          this.setStatus('Flattening form fields...');
+          const newBytes = await PDFEditorService.flattenForm(doc.fileBytes);
+          await this.reloadActiveDocBytes(newBytes, false, 'Flatten form');
+          this.showToast('Form fields flattened into document content.', 'success');
+        } catch (err) {
+          console.error('Flatten form error:', err);
+          this.showToast('Error flattening form fields.', 'error');
+        }
         break;
       }
-      case 'add-checkbox': {
-        if (!doc) return this.showToast('Please open a document first.', 'warning');
-        const name = prompt('Checkbox name:', `check_${Date.now()}`);
-        if (!name) break;
-        this.setStatus('Adding checkbox...');
-        const newBytes = await PDFEditorService.addFormField(doc.fileBytes, doc.currentPage - 1, {
-          type: 'checkbox',
-          name,
-          x: 100,
-          y: 600,
-          width: 20,
-          height: 20,
-        });
-        await this.reloadActiveDocBytes(newBytes);
-        this.showToast(`Checkbox "${name}" added to page ${doc.currentPage}.`, 'success');
-        break;
-      }
-      case 'add-dropdown': {
-        if (!doc) return this.showToast('Please open a document first.', 'warning');
-        const name = prompt('Dropdown name:', `dropdown_${Date.now()}`);
-        if (!name) break;
-        const optsStr = prompt('Options (comma separated):', 'Option 1, Option 2, Option 3') || 'Option 1, Option 2';
-        const options = optsStr.split(',').map((s) => s.trim()).filter(Boolean);
-        this.setStatus('Adding dropdown...');
-        const newBytes = await PDFEditorService.addFormField(doc.fileBytes, doc.currentPage - 1, {
-          type: 'dropdown',
-          name,
-          x: 100,
-          y: 600,
-          width: 180,
-          height: 30,
-          options,
-          defaultValue: options[0],
-        });
-        await this.reloadActiveDocBytes(newBytes);
-        this.showToast(`Dropdown "${name}" added to page ${doc.currentPage}.`, 'success');
-        break;
-      }
+      case 'add-text-field':
+      case 'add-checkbox':
+      case 'add-dropdown':
       case 'add-radio':
       case 'add-signature-field': {
-        this.showToast('Form field creator: drag or click on the page to place field.', 'info');
-        break;
-      }
-      case 'import-form-data': {
-        if (!doc) return this.showToast('Please open a document first.', 'warning');
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        input.onchange = async () => {
-          if (!input.files || input.files.length === 0) return;
-          const file = input.files[0];
-          try {
-            await file.text();
-            this.showToast(`Form data imported from "${file.name}".`, 'success');
-          } catch {
-            this.showToast('Failed to parse JSON file.', 'error');
-          }
+        const typeMap: Record<string, 'text' | 'checkbox' | 'radio' | 'dropdown' | 'signature'> = {
+          'add-text-field': 'text',
+          'add-checkbox': 'checkbox',
+          'add-dropdown': 'dropdown',
+          'add-radio': 'radio',
+          'add-signature-field': 'signature',
         };
-        input.click();
-        break;
-      }
-      case 'export-form-data': {
-        if (!doc) return;
-        const data = await PDFEditorService.exportFormData(doc.fileBytes);
-        const json = JSON.stringify(data, null, 2);
-        const blob = new Blob([json], { type: 'application/json' });
-        const a = document.createElement('a');
-        const url = URL.createObjectURL(blob);
-        a.href = url;
-        a.download = doc.name.replace(/\.[^.]+$/, '') + '_formData.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-        this.showToast('Form data exported to JSON!', 'success');
+        const fieldType = typeMap[action];
+        if (fieldType) {
+          await this.handleCreateFormField(fieldType);
+        }
         break;
       }
 
@@ -2776,6 +3533,168 @@ class SlashPDFApp {
         console.log('Action:', action);
         break;
     }
+  }
+
+  /**
+   * Handle form field creation for any type: text, checkbox, radio, dropdown, signature
+   */
+  private async handleCreateFormField(
+    fieldType: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'signature'
+  ) {
+    const doc = this.getActiveDocument();
+    if (!doc) return this.showToast('Please open a document first.', 'warning');
+
+    const config = await UIDialogs.promptAddFormField(fieldType, doc.currentPage, doc.numPages);
+    if (!config) return;
+
+    if (config.positionPreset === 'pick') {
+      this.startFormFieldPlacement(config);
+      return;
+    }
+
+    await this.applyCreateFormField(config);
+  }
+
+  /**
+   * Apply form field creation to the active document and update view
+   */
+  private async applyCreateFormField(config: {
+    type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'signature';
+    name: string;
+    pageIndex: number;
+    positionPreset: 'center' | 'top' | 'bottom' | 'custom' | 'pick';
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    defaultValue?: string;
+    options?: string[];
+    multiline?: boolean;
+  }) {
+    const doc = this.getActiveDocument();
+    if (!doc) return;
+
+    this.setStatus(`Creating ${config.type} field "${config.name}"...`);
+    try {
+      const newBytes = await PDFEditorService.addFormField(doc.fileBytes, config.pageIndex, {
+        type: config.type,
+        name: config.name,
+        x: config.x,
+        y: config.y,
+        width: config.width,
+        height: config.height,
+        positionPreset: config.positionPreset === 'pick' ? 'custom' : config.positionPreset,
+        options: config.options,
+        defaultValue: config.defaultValue,
+        multiline: config.multiline,
+      });
+
+      if (doc.currentPage !== config.pageIndex + 1) {
+        doc.currentPage = config.pageIndex + 1;
+      }
+
+      await this.reloadActiveDocBytes(newBytes, false, `Add ${config.type} field`);
+      const typeLabels: Record<string, string> = {
+        text: 'Text field',
+        checkbox: 'Checkbox',
+        radio: 'Radio group',
+        dropdown: 'Dropdown',
+        signature: 'Signature field',
+      };
+      this.showToast(
+        `${typeLabels[config.type] || 'Field'} "${config.name}" added to page ${config.pageIndex + 1}.`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Error creating form field:', err);
+      this.showToast('Failed to create form field. Check console for details.', 'error');
+    }
+  }
+
+  /**
+   * Start interactive click-to-place mode on the document for a form field
+   */
+  private startFormFieldPlacement(config: any) {
+    const doc = this.getActiveDocument();
+    if (!doc) return;
+
+    // Scroll target page into view
+    const targetWrapper = document.getElementById(`pageWrapper_${config.pageIndex + 1}`);
+    targetWrapper?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Set cursor to crosshair
+    document.querySelectorAll<HTMLElement>('.pdf-page-wrapper').forEach((w) => {
+      w.style.cursor = 'crosshair';
+    });
+
+    const typeLabels: Record<string, string> = {
+      text: 'Text field',
+      checkbox: 'Checkbox',
+      radio: 'Radio group',
+      dropdown: 'Dropdown',
+      signature: 'Signature field',
+    };
+    this.showToast(
+      `Click anywhere on page ${config.pageIndex + 1} to place ${typeLabels[config.type] || 'field'} "${config.name}" (or press Esc to cancel).`,
+      'info'
+    );
+
+    let cleanedUp = false;
+    const cancelPlacement = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      this.cancelPendingFieldPlacement = null;
+      document.querySelectorAll<HTMLElement>('.pdf-page-wrapper').forEach((w) => {
+        w.style.cursor = '';
+      });
+      window.removeEventListener('keydown', onKeyDown);
+      document.querySelectorAll<HTMLElement>('.pdf-page-wrapper').forEach((w) => {
+        w.removeEventListener('click', onClickWrapper);
+      });
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        cancelPlacement();
+        this.showToast('Field placement cancelled.', 'info');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    this.cancelPendingFieldPlacement = cancelPlacement;
+
+    const onClickWrapper = async (e: MouseEvent) => {
+      const currentDoc = this.getActiveDocument();
+      if (!currentDoc || cleanedUp) return;
+
+      const wrapper = e.currentTarget as HTMLElement;
+      const clickedPageNum = parseInt(wrapper.id.replace('pageWrapper_', ''), 10);
+      const clickedPageIndex = !isNaN(clickedPageNum) ? clickedPageNum - 1 : config.pageIndex;
+
+      const rect = wrapper.getBoundingClientRect();
+      const clickX = (e.clientX - rect.left) / currentDoc.scale;
+      const clickY = (e.clientY - rect.top) / currentDoc.scale;
+
+      const pageHeight = rect.height / currentDoc.scale;
+      const fieldHeight = config.height || 28;
+      const pdfX = Math.max(0, Math.round(clickX));
+      const pdfY = Math.max(0, Math.round(pageHeight - clickY - fieldHeight));
+
+      const fieldConfig = {
+        ...config,
+        pageIndex: clickedPageIndex,
+        x: pdfX,
+        y: pdfY,
+        positionPreset: 'custom',
+      };
+
+      cancelPlacement();
+      await this.applyCreateFormField(fieldConfig);
+    };
+
+    // Attach one-time click listener to each page wrapper
+    document.querySelectorAll<HTMLElement>('.pdf-page-wrapper').forEach((w) => {
+      w.addEventListener('click', onClickWrapper, { once: true });
+    });
   }
 
   /**

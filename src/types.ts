@@ -40,7 +40,8 @@ export type AnnotationType =
   | 'ellipse' 
   | 'freehand' 
   | 'stamp'
-  | 'measure';
+  | 'measure'
+  | 'eraser';
 
 export interface PageAnnotation {
   id: string;
