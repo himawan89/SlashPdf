@@ -249,6 +249,55 @@ export class UIDialogs {
   }
 
   /**
+   * Confirmation dialog for applying true permanent redactions
+   */
+  static async promptApplyRedactions(stats: {
+    marksCount: number;
+    pagesCount: number;
+  }): Promise<boolean> {
+    const html = `
+      <div class="dialog-modal" style="max-width: 500px;">
+        <div class="dialog-header">
+          <h3>
+            <span class="material-symbols-rounded" style="color: var(--danger, #ef4444); font-size: 22px;">cleaning_services</span>
+            Apply Permanent Redactions
+          </h3>
+          <button class="dialog-close-btn" title="Close"><span class="material-symbols-rounded">close</span></button>
+        </div>
+        <div class="dialog-body" style="display:flex; flex-direction:column; gap:14px;">
+          <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 12px; display: flex; gap: 10px; align-items: flex-start;">
+            <span class="material-symbols-rounded" style="color: var(--danger, #ef4444); font-size: 22px; flex-shrink:0; margin-top:1px;">security</span>
+            <div style="font-size: 13px; line-height: 1.45; color: var(--text-main, #1e293b);">
+              <strong>Permanent Sanitize (True Redaction)</strong>
+              <div style="margin-top: 4px; color: var(--text-secondary, #64748b);">
+                You have marked <strong>${stats.marksCount} sensitive area${stats.marksCount === 1 ? '' : 's'}</strong> across <strong>${stats.pagesCount} page${stats.pagesCount === 1 ? '' : 's'}</strong>.
+              </div>
+            </div>
+          </div>
+
+          <div style="font-size: 12.5px; line-height: 1.5; color: var(--text-main, #334155); background: var(--bg-secondary, #f8fafc); border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px;">
+            <p style="margin: 0 0 8px 0; font-weight: 600;">How True Redaction Works:</p>
+            <ul style="margin: 0; padding-left: 18px; color: var(--text-secondary, #64748b); display: flex; flex-direction: column; gap: 4px;">
+              <li>The ${stats.pagesCount} affected page(s) will be converted into high-resolution images (rasterized).</li>
+              <li>Underlying text, OCR layers, glyphs, and image streams beneath the blackout boxes will be <strong>permanently destroyed</strong>.</li>
+              <li>Text beneath the boxes <strong>cannot be extracted, searched, or copied</strong> by any PDF viewer or scraper.</li>
+              <li>Other pages without redactions remain 100% crisp vector format.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="dialog-btn" data-dialog-action="cancel">Cancel</button>
+          <button class="dialog-btn danger" data-dialog-action="confirm">
+            <span class="material-symbols-rounded" style="font-size: 18px;">check</span> Apply & Destroy Underlying Text
+          </button>
+        </div>
+      </div>
+    `;
+
+    return await this.show(html, () => true);
+  }
+
+  /**
    * Watermark Dialog
    */
   static async promptWatermark(): Promise<{
@@ -2504,6 +2553,9 @@ export class UIDialogs {
             <span class="badge" style="background: rgba(249,87,56,0.1); color: var(--primary); padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; white-space: nowrap;">${originalFormatted}</span>
           </div>
 
+          <!-- Document Structure Profile Notice -->
+          <div id="compressProfileNotice" style="display: none; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 9px 12px; font-size: 11.5px; color: var(--text-main); line-height: 1.4;"></div>
+
           <!-- Mode / Preset Selection -->
           <div>
             <div style="font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 8px;">Select Compression Level:</div>
@@ -2514,7 +2566,7 @@ export class UIDialogs {
                 <div style="flex: 1;">
                   <div style="display: flex; align-items: center; justify-content: space-between;">
                     <span style="font-size: 12.5px; font-weight: 600; color: var(--text-main);">Light Compression</span>
-                    <span style="font-size: 10px; background: rgba(37,99,235,0.08); color: var(--accent-blue); padding: 1px 6px; border-radius: 8px;">High Quality (~85%)</span>
+                    <span style="font-size: 10px; background: rgba(37,99,235,0.08); color: var(--accent-blue); padding: 1px 6px; border-radius: 8px;">High Quality</span>
                   </div>
                   <div style="font-size: 11px; color: var(--text-muted); line-height: 1.3; margin-top: 2px;">Maximum visual clarity for important documents & print.</div>
                 </div>
@@ -2538,7 +2590,7 @@ export class UIDialogs {
                 <div style="flex: 1;">
                   <div style="display: flex; align-items: center; justify-content: space-between;">
                     <span style="font-size: 12.5px; font-weight: 600; color: var(--text-main);">Strong Compression</span>
-                    <span style="font-size: 10px; background: rgba(245,158,11,0.1); color: var(--accent-amber); padding: 1px 6px; border-radius: 8px;">Smallest Size (~48%)</span>
+                    <span style="font-size: 10px; background: rgba(245,158,11,0.1); color: var(--accent-amber); padding: 1px 6px; border-radius: 8px; font-weight: 600;">Smallest Size</span>
                   </div>
                   <div style="font-size: 11px; color: var(--text-muted); line-height: 1.3; margin-top: 2px;">Maximum size reduction when strict upload limits apply.</div>
                 </div>
@@ -2595,23 +2647,23 @@ export class UIDialogs {
             </label>
             <label style="font-size: 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-main);">
               <input type="checkbox" id="compressOptRaster" />
-              <span>Rasterize Page Mode <em>(Recommended for scanned documents or extreme target size)</em></span>
+              <span>Rasterize Page Mode <em>(Recommended for scanned documents, CAD blueprints, or extreme size reduction)</em></span>
             </label>
           </div>
 
           <!-- Live Preview & Comparison Box -->
           <div id="compressLiveBox" style="background: var(--bg-hover); border-radius: var(--radius-md); border: 1px solid var(--border-color); border-left: 4px solid var(--primary); padding: 12px 14px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-              <span style="font-size: 12px; font-weight: 600; color: var(--text-main);">Estimated & Test Results:</span>
-              <span id="compressLiveBadge" style="background: rgba(16,185,129,0.15); color: var(--accent-green); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px;">Est: ~50% Savings</span>
+              <span style="font-size: 12px; font-weight: 600; color: var(--text-main);">Calculated Test Results:</span>
+              <span id="compressLiveBadge" style="background: rgba(249,87,56,0.12); color: var(--primary); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px;">Calculating...</span>
             </div>
             <div style="display: flex; align-items: center; gap: 14px; font-size: 12.5px; color: var(--text-main); margin-bottom: 6px;">
               <div>Original Size: <strong>${originalFormatted}</strong></div>
               <span style="color: var(--text-muted); font-size: 14px;">➔</span>
-              <div>New Size: <strong id="compressLiveSizeText" style="color: var(--primary);">~${formatBytes(Math.round(originalSizeBytes * 0.5))}</strong></div>
+              <div>New Size: <strong id="compressLiveSizeText" style="color: var(--primary);"><span class="material-symbols-rounded" style="font-size: 14px; animation: spin 1s linear infinite; vertical-align: middle;">sync</span> Calculating...</strong></div>
             </div>
             <div id="compressLiveStatusMessage" style="font-size: 11.5px; color: var(--text-muted); line-height: 1.4;">
-              Click <strong>"Calculate / Test Size"</strong> to test compression and preview the exact size, or click <strong>"Save PDF"</strong> to choose where to save the file.
+              Analyzing document structure and verifying exact compression ratio...
             </div>
           </div>
         </div>
@@ -2632,6 +2684,7 @@ export class UIDialogs {
     let cachedResult: PDFCompressResult | null = null;
     let lastOptionsJson = '';
     let isCompressing = false;
+    let debounceTimer: any = null;
 
     setTimeout(() => {
       const modeCards = document.querySelectorAll('.compress-mode-card');
@@ -2646,6 +2699,7 @@ export class UIDialogs {
       const optImages = document.getElementById('compressOptImages') as HTMLInputElement;
       const optRaster = document.getElementById('compressOptRaster') as HTMLInputElement;
 
+      const profileNotice = document.getElementById('compressProfileNotice') as HTMLDivElement;
       const liveBadge = document.getElementById('compressLiveBadge') as HTMLSpanElement;
       const liveSizeText = document.getElementById('compressLiveSizeText') as HTMLElement;
       const liveStatusMessage = document.getElementById('compressLiveStatusMessage') as HTMLDivElement;
@@ -2673,6 +2727,121 @@ export class UIDialogs {
         };
       };
 
+      const renderResult = (result: PDFCompressResult, opts: PDFCompressOptions) => {
+        const mode = opts.preset;
+        const newSizeFormatted = formatBytes(result.newSize);
+        liveSizeText.textContent = `${newSizeFormatted} (${(result.newSize / 1024).toFixed(1)} KB)`;
+        liveBadge.textContent = `-${result.reductionPercentage.toFixed(1)}% Saved`;
+        liveBadge.style.background = 'rgba(16,185,129,0.15)';
+        liveBadge.style.color = 'var(--accent-green)';
+
+        const estRasterBytes = Math.round(originalSizeBytes * 0.28);
+        const estRasterFormatted = formatBytes(estRasterBytes);
+
+        if (opts.rasterizePages) {
+          liveStatusMessage.innerHTML = `<span style="color: var(--accent-green); font-weight:600;">✓ Rasterize compression complete!</span> Document reduced by <strong>${result.reductionPercentage.toFixed(1)}%</strong> (${newSizeFormatted}). Click <strong>"Save PDF"</strong> to choose where to save.`;
+          return;
+        }
+
+        if (mode === 'target' && opts.targetSizeKB) {
+          if (result.newSize <= opts.targetSizeKB * 1024) {
+            liveStatusMessage.innerHTML = `<span style="color: var(--accent-green); font-weight:600;">✓ File size meets your target!</span> New size: <strong>${newSizeFormatted}</strong> (Target: ${formatBytes(opts.targetSizeKB * 1024)}). Ready to save!`;
+          } else {
+            liveStatusMessage.innerHTML = `
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <div><span style="color: var(--accent-amber); font-weight:600;">ℹ Standard vector reduction reached ${newSizeFormatted}</span> (Target: ${formatBytes(opts.targetSizeKB * 1024)}). Vector CAD lines cannot be compressed further without rasterization.</div>
+                <div><button type="button" id="btnSwitchToRaster" style="background: var(--primary); color: #fff; border: none; padding: 5px 12px; border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"><span class="material-symbols-rounded" style="font-size: 15px;">auto_fix_high</span> Switch to Rasterize Mode (~${estRasterFormatted})</button></div>
+              </div>`;
+            document.getElementById('btnSwitchToRaster')?.addEventListener('click', () => {
+              if (optRaster) {
+                optRaster.checked = true;
+                runCompressionTest();
+              }
+            });
+          }
+          return;
+        }
+
+        if (result.reductionPercentage < 12) {
+          liveStatusMessage.innerHTML = `
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div><span style="color: var(--accent-amber); font-weight:600;">ℹ Standard vector reduction is only ${result.reductionPercentage.toFixed(1)}%</span> (${newSizeFormatted}). This document is dominated by vector CAD blueprints & text with few compressible images.</div>
+              <div><button type="button" id="btnSwitchToRaster" style="background: var(--primary); color: #fff; border: none; padding: 5px 12px; border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;"><span class="material-symbols-rounded" style="font-size: 15px;">auto_fix_high</span> Switch to Rasterize Mode (~${estRasterFormatted})</button></div>
+            </div>`;
+          document.getElementById('btnSwitchToRaster')?.addEventListener('click', () => {
+            if (optRaster) {
+              optRaster.checked = true;
+              runCompressionTest();
+            }
+          });
+        } else {
+          liveStatusMessage.innerHTML = `<span style="color: var(--accent-green); font-weight:600;">✓ Accurate compression test complete!</span> Document reduced by <strong>${result.reductionPercentage.toFixed(1)}%</strong> (${newSizeFormatted}). Click <strong>"Save PDF"</strong> to choose where to save.`;
+        }
+      };
+
+      const runCompressionTest = async () => {
+        if (isCompressing) return;
+        isCompressing = true;
+        if (btnTest) btnTest.disabled = true;
+        if (btnSave) btnSave.disabled = true;
+
+        const opts = collectOptions();
+        const currentJson = JSON.stringify(opts);
+
+        if (btnTest) {
+          btnTest.innerHTML = `<span class="material-symbols-rounded" style="font-size: 16px; animation: spin 1s linear infinite;">sync</span> Compressing...`;
+        }
+        liveSizeText.innerHTML = `<span style="color: var(--text-muted); font-size: 12px;"><span class="material-symbols-rounded" style="font-size: 14px; animation: spin 1s linear infinite; vertical-align: middle;">sync</span> Calculating exact size...</span>`;
+        liveBadge.textContent = 'Calculating...';
+        liveBadge.style.background = 'rgba(249,87,56,0.12)';
+        liveBadge.style.color = 'var(--primary)';
+
+        if (opts.rasterizePages) {
+          liveStatusMessage.innerHTML = `<span style="color: var(--primary); font-weight:600;"><span class="material-symbols-rounded" style="font-size: 15px; animation: spin 1s linear infinite; vertical-align: middle;">sync</span> Rasterizing pages into optimized JPEG streams...</span> Please wait.`;
+        } else {
+          liveStatusMessage.innerHTML = `<span style="color: var(--primary); font-weight:600;"><span class="material-symbols-rounded" style="font-size: 15px; animation: spin 1s linear infinite; vertical-align: middle;">sync</span> Compressing visual streams and optimizing structure...</span> Please wait.`;
+        }
+
+        try {
+          const result = await PDFEditorService.compressPDF(docBytes, {
+            ...opts,
+            onProgress: (pText: string) => {
+              if (liveStatusMessage) {
+                liveStatusMessage.innerHTML = `<span style="color: var(--primary); font-weight:600;"><span class="material-symbols-rounded" style="font-size: 15px; animation: spin 1s linear infinite; vertical-align: middle;">sync</span> ${pText}</span>`;
+              }
+            }
+          });
+          cachedResult = result;
+          lastOptionsJson = currentJson;
+          renderResult(result, opts);
+        } catch (err: any) {
+          liveStatusMessage.innerHTML = `<span style="color: var(--danger); font-weight:600;">Compression test failed:</span> ${err.message || 'An error occurred.'}`;
+        } finally {
+          isCompressing = false;
+          if (btnTest) {
+            btnTest.disabled = false;
+            btnTest.innerHTML = `<span class="material-symbols-rounded" style="font-size: 16px;">speed</span> Calculate / Test Size`;
+          }
+          if (btnSave) btnSave.disabled = false;
+        }
+      };
+
+      const scheduleTest = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        const currentJson = JSON.stringify(collectOptions());
+        if (cachedResult && lastOptionsJson === currentJson) {
+          renderResult(cachedResult, collectOptions());
+          return;
+        }
+        liveSizeText.innerHTML = `<span style="color: var(--text-muted); font-size: 12px;"><span class="material-symbols-rounded" style="font-size: 14px; animation: spin 1s linear infinite; vertical-align: middle;">sync</span> Calculating...</span>`;
+        liveBadge.textContent = 'Calculating...';
+        liveBadge.style.background = 'rgba(249,87,56,0.12)';
+        liveBadge.style.color = 'var(--primary)';
+        debounceTimer = setTimeout(() => {
+          runCompressionTest();
+        }, 250);
+      };
+
       const updateModeCardStyles = () => {
         const currentMode = getSelectedMode();
         modeCards.forEach((card) => {
@@ -2694,59 +2863,7 @@ export class UIDialogs {
           targetPane.style.display = currentMode === 'target' ? 'block' : 'none';
         }
 
-        updateLiveEstimate();
-      };
-
-      const updateLiveEstimate = () => {
-        const mode = getSelectedMode();
-        const currentOptions = collectOptions();
-        const currentJson = JSON.stringify(currentOptions);
-
-        if (cachedResult && lastOptionsJson === currentJson) {
-          // Display cached exact result
-          const newSizeFormatted = formatBytes(cachedResult.newSize);
-          liveSizeText.textContent = `${newSizeFormatted} (${(cachedResult.newSize / 1024).toFixed(1)} KB)`;
-          liveBadge.textContent = `-${cachedResult.reductionPercentage.toFixed(1)}% Saved`;
-          liveBadge.style.background = 'rgba(16,185,129,0.15)';
-          liveBadge.style.color = 'var(--accent-green)';
-
-          if (mode === 'target' && currentOptions.targetSizeKB) {
-            if (cachedResult.newSize <= currentOptions.targetSizeKB * 1024) {
-              liveStatusMessage.innerHTML = `<span style="color: var(--accent-green); font-weight:600;">✓ File size meets your desired target!</span> New size: <strong>${newSizeFormatted}</strong> (Target: ${formatBytes(currentOptions.targetSizeKB * 1024)}). Ready to save!`;
-            } else {
-              liveStatusMessage.innerHTML = `<span style="color: var(--accent-amber); font-weight:600;">ℹ Size reached: ${newSizeFormatted} (Target: ${formatBytes(currentOptions.targetSizeKB * 1024)}).</span> Document is dominated by vector text with minimal images. You can enable <em>"Rasterize Page Mode"</em> to force a smaller file size, or click <strong>"Save PDF"</strong>.`;
-            }
-          } else {
-            liveStatusMessage.innerHTML = `<span style="color: var(--accent-green); font-weight:600;">✓ Accurate compression test complete!</span> Document reduced by <strong>${cachedResult.reductionPercentage.toFixed(1)}%</strong>. Click <strong>"Save PDF"</strong> to choose where to save.`;
-          }
-          return;
-        }
-
-        // Show estimate before testing
-        let estRatio = 0.5;
-        let estBadge = '~50% Savings';
-        if (mode === 'light') {
-          estRatio = 0.8;
-          estBadge = 'Est: ~20% Savings';
-        } else if (mode === 'balanced') {
-          estRatio = 0.5;
-          estBadge = 'Est: ~50% Savings';
-        } else if (mode === 'strong') {
-          estRatio = 0.3;
-          estBadge = 'Est: ~70% Savings';
-        } else if (mode === 'target') {
-          const tKb = getTargetKB();
-          estRatio = Math.min(1.0, (tKb * 1024) / originalSizeBytes);
-          const pct = Math.max(0, Math.round((1 - estRatio) * 100));
-          estBadge = `Target: ~${pct}% Savings`;
-        }
-
-        const estBytes = Math.round(originalSizeBytes * estRatio);
-        liveSizeText.textContent = `~${formatBytes(estBytes)} (Estimated)`;
-        liveBadge.textContent = estBadge;
-        liveBadge.style.background = 'rgba(249,87,56,0.12)';
-        liveBadge.style.color = 'var(--primary)';
-        liveStatusMessage.innerHTML = `Click <strong>"Calculate / Test Size"</strong> to test compression and preview the exact size, or click <strong>"Save PDF"</strong> to choose where to save the file.`;
+        scheduleTest();
       };
 
       const updateTargetDisplay = () => {
@@ -2754,7 +2871,7 @@ export class UIDialogs {
         if (targetHint) {
           targetHint.innerHTML = `Target: <strong>${formatBytes(kb * 1024)}</strong> (${kb} KB)`;
         }
-        updateLiveEstimate();
+        scheduleTest();
       };
 
       // Mode card clicks
@@ -2800,37 +2917,32 @@ export class UIDialogs {
 
       [optStreams, optMetadata, optImages, optRaster].forEach((cb) => {
         cb?.addEventListener('change', () => {
-          updateLiveEstimate();
+          scheduleTest();
         });
       });
 
       // Calculate / Test Size Button
-      btnTest?.addEventListener('click', async () => {
-        if (isCompressing) return;
-        isCompressing = true;
-        btnTest.disabled = true;
-        btnSave.disabled = true;
-        const originalBtnHtml = btnTest.innerHTML;
-        btnTest.innerHTML = `<span class="material-symbols-rounded" style="font-size: 16px; animation: spin 1s linear infinite;">sync</span> Compressing...`;
-        liveStatusMessage.innerHTML = `<span style="color: var(--primary); font-weight:600;">Compressing document and optimizing visual streams...</span> Please wait.`;
-
-        try {
-          const opts = collectOptions();
-          const result = await PDFEditorService.compressPDF(docBytes, opts);
-          cachedResult = result;
-          lastOptionsJson = JSON.stringify(opts);
-          updateLiveEstimate();
-        } catch (err: any) {
-          liveStatusMessage.innerHTML = `<span style="color: var(--danger); font-weight:600;">Compression test failed:</span> ${err.message || 'An error occurred.'}`;
-        } finally {
-          isCompressing = false;
-          btnTest.disabled = false;
-          btnSave.disabled = false;
-          btnTest.innerHTML = originalBtnHtml;
-        }
+      btnTest?.addEventListener('click', () => {
+        runCompressionTest();
       });
 
       updateModeCardStyles();
+
+      // Quick structure analysis on load
+      PDFEditorService.analyzePDFStructure(docBytes).then((prof) => {
+        if (prof.isVectorHeavy && profileNotice) {
+          profileNotice.style.display = 'block';
+          const estMb = formatBytes(Math.round(originalSizeBytes * 0.28));
+          profileNotice.innerHTML = `
+            <div style="display: flex; align-items: flex-start; gap: 8px;">
+              <span class="material-symbols-rounded" style="color: var(--accent-blue); font-size: 18px; margin-top: 1px;">architecture</span>
+              <div style="flex: 1;">
+                <strong>Vector / CAD Blueprint Document:</strong> Contains CAD vector drawings & text with minimal raster images (${prof.imageCount} image${prof.imageCount === 1 ? '' : 's'}). Standard mode preserves line accuracy (~3-5% reduction). To achieve small file size (e.g. for portal upload), use <strong>Rasterize Page Mode</strong> (~${estMb}).
+              </div>
+            </div>`;
+        }
+        runCompressionTest();
+      });
     }, 20);
 
     const validator = async (): Promise<boolean> => {

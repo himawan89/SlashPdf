@@ -2,7 +2,7 @@
 
 > **Free, full-featured, and privacy-first PDF editor running 100% client-side in your browser.**
 
-[![Cloudflare Pages](https://img.shields.io/badge/Deploy-Cloudflare%20Pages-F38020?logo=cloudflare&logoColor=white)](https://pages.cloudflare.com/)
+[![Cloudflare Workers](https://img.shields.io/badge/Deploy-Cloudflare%20Workers-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/)
 [![Built with Vite](https://img.shields.io/badge/Vite-8.x-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Privacy: 100% Client-Side](https://img.shields.io/badge/Privacy-100%25%20Client--Side-10B981)](#-privacy--client-side-architecture)
@@ -16,7 +16,9 @@ SlashPDF was built around one non-negotiable principle: **Your documents belong 
 - **Zero Server Uploads:** All document reading, parsing, rendering, text editing, merging, splitting, compressing, and encryption take place directly in your browser using JavaScript and WebAssembly powered by [pdf-lib](https://pdf-lib.js.org/) and [pdf.js](https://mozilla.github.io/pdf.js/).
 - **No Backend Server:** There is no remote API or backend server that ever receives, processes, or caches your PDF files.
 - **Offline Capable:** Once the application assets are loaded in your browser, you can disconnect from the internet and continue using all features without interruption.
-- **No Tracking or Telemetry:** No invasive analytics, tracking pixels, or third parties monitoring your files or workflow.
+- **No Tracking or Telemetry:** No invasive analytics or tracking pixels monitoring your files or workflow.
+
+> **⚠️ Current Limitation:** The app currently loads fonts (Inter, Material Symbols) from Google Fonts and PDF character maps from jsdelivr CDN. This means your IP address is visible to those third parties on first load. A future update will bundle all assets locally to eliminate these external requests entirely. See [PATCH_ROADMAP.md](PATCH_ROADMAP.md) Patch 2.1 for progress.
 
 ---
 
@@ -94,8 +96,8 @@ SlashPDF provides a comprehensive set of features comparable to desktop PDF suit
 ### 6. 🛡️ Security, Signatures & Redaction
 - **Password & Permissions:** Protect documents with user passwords and restrict printing/copying permissions.
 - **Digital / Drawn Signature:** Draw signatures with mouse or touchscreen and apply them onto pages.
-- **Permanent Redaction:** Black out sensitive text or regions permanently (completely removed from the underlying PDF stream).
-- **Sanitize Metadata:** Strip metadata (author, creation tools, modification history) to protect privacy before sharing.
+- **True Redaction (Rasterization-Based):** Mark sensitive text or regions with the Redact tool, then click **Apply Redact** to permanently destroy the underlying content. Affected pages are rasterized (rendered to a high-resolution image), so all vector text streams, fonts, OCR layers, and objects beneath the blackout boxes are irreversibly destroyed and cannot be extracted, searched, or copied by any PDF viewer. Pages without redactions remain in their original crisp vector format.
+- **Sanitize Metadata:** Strip standard metadata fields (Title, Author, Subject, Keywords, Creator) to protect privacy before sharing. *(Note: XMP metadata streams and date fields may still be present — see [PATCH_ROADMAP.md](PATCH_ROADMAP.md) Patch 1.3 for planned deep sanitization.)*
 
 ### 7. ⚡ Conversion & Quick Utilities
 - **Merge PDFs:** Combine multiple PDF documents and images into a single file.
@@ -111,38 +113,32 @@ SlashPDF provides a comprehensive set of features comparable to desktop PDF suit
 
 ---
 
-## 🚀 Cloudflare Pages Deployment Guide
+## 🚀 Cloudflare Workers (Static Assets) Deployment Guide
 
-SlashPDF is a static Single-Page Application (SPA) with zero backend requirements, making it ideal for hosting on **Cloudflare Pages**.
+SlashPDF is a static Single-Page Application (SPA) with zero backend requirements, deployed as a **Cloudflare Worker with Static Assets**.
 
 The repository includes pre-configured Cloudflare deployment files:
-- `public/_redirects`: Handles SPA fallback routing (`/* -> /index.html 200`).
 - `public/_headers`: Security headers (`X-Frame-Options`, `X-Content-Type-Options`) and caching rules (`/assets/*`).
-- `wrangler.toml`: Cloudflare Pages build output configuration (`pages_build_output_dir = "./dist"`).
+- `wrangler.toml`: Cloudflare Workers Static Assets configuration (`[assets]` with `directory = "./dist"` and `not_found_handling = "single-page-application"`).
 - `.node-version`: Sets the build environment to Node 20+.
 
-### Method 1: Git Integration (Recommended)
-1. Push your repository to **GitHub** or **GitLab**.
-2. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/) > **Workers & Pages** > **Create application** > **Pages** > **Connect to Git**.
-3. Select your SlashPDF repository and use the following build configuration:
-   - **Framework preset:** `Vite` (or `None`)
-   - **Build command:** `npm run build`
-   - **Build output directory:** `dist`
-   - **Root directory:** `/` (default)
-4. Click **Save and Deploy**. Cloudflare will automatically build and distribute your app worldwide via its global CDN on every push!
-
-### Method 2: Direct Deploy via Wrangler CLI
-If you prefer deploying directly from your local machine:
+### Method 1: Direct Deploy via Wrangler CLI
 ```bash
 # 1. Build the production bundle
 npm run build
 
-# 2. Deploy to Cloudflare Pages
+# 2. Deploy to Cloudflare Workers
 npm run deploy
-
-# Alternatively using npx directly:
-# npx wrangler pages deploy dist
+# This runs: wrangler deploy
 ```
+
+### Method 2: Git Integration (CI/CD)
+1. Push your repository to **GitHub** or **GitLab**.
+2. Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/) > **Workers & Pages** > **Create application** > **Import a repository**.
+3. Select your SlashPDF repository and use the following build configuration:
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+4. Click **Save and Deploy**. Cloudflare will automatically build and distribute your app worldwide via its global CDN on every push!
 
 ---
 

@@ -41,7 +41,8 @@ export type AnnotationType =
   | 'freehand' 
   | 'stamp'
   | 'measure'
-  | 'eraser';
+  | 'eraser'
+  | 'redact';
 
 export interface PageAnnotation {
   id: string;
@@ -91,6 +92,7 @@ export interface PDFCompressOptions {
   removeMetadata?: boolean;
   compressImages?: boolean;
   rasterizePages?: boolean;
+  onProgress?: (progressText: string) => void;
 }
 
 export interface PDFCompressResult {
@@ -101,4 +103,15 @@ export interface PDFCompressResult {
   imagesCompressed: number;
   isTargetMet: boolean;
   message?: string;
+  isRasterized?: boolean;
+  isVectorHeavy?: boolean;
 }
+
+export interface PDFDocumentProfile {
+  totalPages: number;
+  imageCount: number;
+  totalImageBytes: number;
+  imageRatio: number;
+  isVectorHeavy: boolean;
+}
+

@@ -14,8 +14,9 @@ export class PDFViewerManager {
     const bytesClone = bytes.slice(0);
     const loadingTask = pdfjsLib.getDocument({
       data: bytesClone,
-      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@' + pdfjsLib.version + '/cmaps/',
+      cMapUrl: '/cmaps/',
       cMapPacked: true,
+      standardFontDataUrl: '/standard_fonts/',
     });
     return await loadingTask.promise;
   }

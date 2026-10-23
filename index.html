@@ -5,10 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SlashPDF — Free PDF Editor</title>
   <meta name="description" content="SlashPDF is a free, full-featured PDF editor. View, edit, merge, convert, annotate, and sign PDF documents directly in your browser." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Rounded" rel="stylesheet" />
   <link rel="stylesheet" href="/src/style.css" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
@@ -512,9 +508,13 @@
           <div class="ribbon-group">
             <div class="ribbon-group-label">Redaction</div>
             <div class="ribbon-group-content">
-              <button class="ribbon-btn ribbon-btn-lg" data-action="redact">
+              <button class="ribbon-btn ribbon-btn-lg" data-action="redact" title="Mark sensitive areas for permanent redaction">
                 <span class="material-symbols-rounded">visibility_off</span>
                 <span class="ribbon-btn-label">Redact</span>
+              </button>
+              <button class="ribbon-btn ribbon-btn-lg" data-action="apply-redact" title="Apply all redaction marks permanently (rasterize affected pages)">
+                <span class="material-symbols-rounded" style="color:#ef4444">cleaning_services</span>
+                <span class="ribbon-btn-label">Apply Redact</span>
               </button>
             </div>
           </div>

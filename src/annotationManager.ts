@@ -221,6 +221,36 @@ export class AnnotationManager {
           }
           break;
 
+        case 'redact':
+          if (annot.rect) {
+            const rx = annot.rect.x * scale;
+            const ry = annot.rect.y * scale;
+            const rw = annot.rect.width * scale;
+            const rh = annot.rect.height * scale;
+
+            // Solid blackout fill
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(rx, ry, rw, rh);
+
+            // Red dashed indicator border showing pending redaction
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = Math.max(1, 1.5 * scale);
+            ctx.setLineDash([4 * scale, 3 * scale]);
+            ctx.strokeRect(rx, ry, rw, rh);
+            ctx.setLineDash([]);
+
+            // Text label if large enough
+            if (rw > 45 * scale && rh > 16 * scale) {
+              const fontSize = Math.max(9, Math.min(13, rh * 0.42));
+              ctx.font = `bold ${fontSize}px sans-serif`;
+              ctx.fillStyle = '#ef4444';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('REDACT', rx + rw / 2, ry + rh / 2);
+            }
+          }
+          break;
+
         case 'ellipse':
           if (annot.rect) {
             ctx.beginPath();

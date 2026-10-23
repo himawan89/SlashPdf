@@ -1,3 +1,5 @@
+import '@fontsource-variable/inter';
+import '@fontsource-variable/material-symbols-rounded';
 import './style.css';
 import type { PDFDocumentItem, ViewLayoutMode, AnnotationType, SearchResult, DocumentHistorySnapshot } from './types';
 import { PDFEditorService } from './pdfEditor';
@@ -2196,9 +2198,10 @@ class SlashPDFApp {
       const height = cr.height / scale;
 
       let color = this.annotationManager.getCurrentColor();
-      if (!color || color === '#FBBF24') {
+      if (!color || color === '#FBBF24' || tool === 'redact') {
         if (tool === 'underline') color = '#2563EB';
         else if (tool === 'strikethrough') color = '#DC2626';
+        else if (tool === 'redact') color = '#000000';
       }
 
       const annot = this.annotationManager.createAnnotation(pageIndex, tool, {
@@ -2232,8 +2235,15 @@ class SlashPDFApp {
           ? 'Underline'
           : tool === 'strikethrough'
           ? 'Strikethrough'
+          : tool === 'redact'
+          ? 'Redact'
           : 'Highlight';
-      this.showToast(`${label} applied to selected text.`, 'success');
+      this.showToast(
+        tool === 'redact'
+          ? 'Redaction marked on selection. Click "Apply Redact" to permanently sanitize.'
+          : `${label} applied to selected text.`,
+        'success'
+      );
       return true;
     }
 
@@ -2561,6 +2571,32 @@ class SlashPDFApp {
             doc.annotations.push(annot);
             rerenderPage();
             this.pushHistorySnapshot('Add markup');
+          }
+        }
+        return;
+      }
+
+      // Redaction markup: check if applied to selection first, otherwise add dragged rect
+      if (tool === 'redact') {
+        const applied = this.applyTextMarkupToSelection('redact');
+        if (!applied) {
+          const rect = {
+            x: Math.min(startPos.x, endPos.x),
+            y: Math.min(startPos.y, endPos.y),
+            width: Math.abs(endPos.x - startPos.x),
+            height: Math.abs(endPos.y - startPos.y),
+          };
+          if (rect.width > 4 && rect.height > 4) {
+            const annot = this.annotationManager.createAnnotation(pageIndex, 'redact', {
+              rect,
+              color: '#000000',
+              strokeWidth: 1,
+              opacity: 1.0,
+            });
+            doc.annotations.push(annot);
+            rerenderPage();
+            this.pushHistorySnapshot('Add redaction mark');
+            this.showToast('Redaction marked. Click "Apply Redact" to permanently sanitize.', 'info');
           }
         }
         return;
@@ -3048,10 +3084,10 @@ class SlashPDFApp {
       case 'remove-metadata':
       case 'remove-hidden-info': {
         if (!doc) return this.showToast('Please open a document first.', 'warning');
-        if (confirm('Remove all hidden metadata and sanitize document? This protects your privacy.')) {
+        if (confirm('Deep Sanitize: Permanently strip all document metadata, XMP streams, creation/modification dates, author info, and thumbnails? Continue?')) {
           const newBytes = await PDFEditorService.removeMetadata(doc.fileBytes);
           await this.reloadActiveDocBytes(newBytes, false, 'Sanitize document');
-          this.showToast('Document sanitized and metadata removed.', 'success');
+          this.showToast('Document deeply sanitized: metadata, XMP streams, and timestamps removed.', 'success');
         }
         break;
       }
@@ -3517,15 +3553,76 @@ class SlashPDFApp {
       }
 
       case 'redact': {
-        if (!doc) return;
-        const confirmed = confirm(
-          'Redaction Mode: Draw a black box over sensitive text or images to permanently obscure them. Continue?'
-        );
-        if (confirmed) {
-          this.annotationManager.setActiveTool('rectangle');
-          this.annotationManager.setProperties('#000000', 1, 1.0);
-          this.showToast('Drag across sensitive areas to redact permanently.', 'info');
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+        this.annotationManager.setActiveTool('redact');
+        this.annotationManager.setProperties('#000000', 1, 1.0);
+        this.isHandTool = false;
+        this.updateToolButtons();
+        this.updateCursorMode();
+        this.showToast('Drag across sensitive areas to mark for redaction. Then click "Apply Redact" to permanently sanitize.', 'info');
+        break;
+      }
+
+      case 'apply-redact': {
+        if (!doc) return this.showToast('Please open a document first.', 'warning');
+
+        // Collect all redact annotations grouped by page
+        const redactAnnots = doc.annotations.filter((a) => a.type === 'redact' && a.rect);
+        if (redactAnnots.length === 0) {
+          this.showToast('No redaction marks found. Use the Redact tool to mark sensitive areas first.', 'warning');
+          break;
         }
+
+        const affectedPages = new Set(redactAnnots.map((a) => a.pageIndex));
+
+        // Show confirmation dialog
+        const confirmed = await UIDialogs.promptApplyRedactions({
+          marksCount: redactAnnots.length,
+          pagesCount: affectedPages.size,
+        });
+        if (!confirmed) break;
+
+        this.setStatus('Applying permanent redactions (rasterizing affected pages)...');
+        this.showToast('Applying true redaction... This may take a moment.', 'info');
+
+        try {
+          // Build redaction map: pageIndex -> rects[]
+          // Coordinates from annotation canvas are in screen/canvas coords (top-left origin).
+          // pdf-lib / pdfjs-dist viewport uses same top-left origin at scale 1.0.
+          const redactionsByPage = new Map<number, { x: number; y: number; width: number; height: number }[]>();
+          for (const annot of redactAnnots) {
+            if (!annot.rect) continue;
+            if (!redactionsByPage.has(annot.pageIndex)) {
+              redactionsByPage.set(annot.pageIndex, []);
+            }
+            redactionsByPage.get(annot.pageIndex)!.push({
+              x: annot.rect.x,
+              y: annot.rect.y,
+              width: annot.rect.width,
+              height: annot.rect.height,
+            });
+          }
+
+          const newBytes = await PDFEditorService.applyTrueRedaction(doc.fileBytes, redactionsByPage);
+
+          // Remove redact annotations from document (they are now baked into the raster)
+          doc.annotations = doc.annotations.filter((a) => a.type !== 'redact');
+
+          // Deactivate redact tool
+          this.annotationManager.setActiveTool(null);
+          this.updateToolButtons();
+          this.updateCursorMode();
+
+          await this.reloadActiveDocBytes(newBytes, false, 'Apply true redaction');
+          this.showToast(
+            `Redaction applied: ${redactAnnots.length} area(s) on ${affectedPages.size} page(s) permanently sanitized.`,
+            'success'
+          );
+        } catch (err: any) {
+          console.error('True redaction failed:', err);
+          this.showToast('Redaction failed: ' + (err?.message || 'Unknown error'), 'error');
+        }
+        this.setStatus('Ready');
         break;
       }
 
